@@ -1,0 +1,19 @@
+[Unit]
+Description=Bot Rilem/Miler — Discord
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Ajuste o caminho abaixo para o diretório real do projeto no HeavenCloud
+WorkingDirectory=/home/seu_usuario/rilem
+# Usa o Python do virtualenv (recomendado)
+ExecStart=/home/seu_usuario/rilem/venv/bin/python bot.py
+Restart=on-failure
+RestartSec=10s
+# Variáveis de ambiente são lidas do .env pelo python-dotenv
+# mas você também pode defini-las aqui como camada extra de segurança:
+# EnvironmentFile=/home/seu_usuario/rilem/.env
+
+[Install]
+WantedBy=multi-user.target

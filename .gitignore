@@ -1,0 +1,11 @@
+# Segredos — NUNCA commitar!
+.env
+cookies.txt
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
