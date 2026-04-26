@@ -1,7 +1,8 @@
-# Segredos — NUNCA commitar!
+# Segredos e Binários — NUNCA commitar!
 .env
 cookies.txt
 *.key
+*.zip
 
 # Python
 __pycache__/
