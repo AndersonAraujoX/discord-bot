@@ -21,35 +21,26 @@ class DadosCog(commands.Cog, name="Dados"):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    # ── Comando principal ─────────────────────────────────────────────────────
+    # ── Guia de Ajuda ─────────────────────────────────────────────────────────
+    @commands.command(name="dados")
+    async def help_dados(self, ctx: commands.Context) -> None:
+        """Exibe o guia de como rolar dados."""
+        help_text = (
+            "🎲 **Guia de Rolagem de Dados**\n\n"
+            "**Básico:**\n"
+            "`d20` — Rola um dado de 20 faces.\n"
+            "`3d6` — Rola 3 dados de 6 faces e soma tudo.\n\n"
+            "**Variações Avançadas:**\n"
+            "`d20+5` — Adiciona um bônus ao total.\n"
+            "`4d6d1` — Rola 4 dados e **descarta (drop)** o menor (comum em D&D).\n"
+            "`d6!` — Dado **Explosivo** (se tirar 6, rola outro e soma).\n"
+            "`3d10!8` — Explode se tirar 8, 9 ou 10.\n\n"
+            "**Rolagem em Massa:**\n"
+            "`10#d20` — Faz 10 rolagens de d20 de uma vez.\n"
+            "`6#4d6d1` — Gera 6 atributos de personagem (D&D).\n"
+        )
+        await ctx.send(help_text)
 
-    @commands.command(name="roll", aliases=["r"])
-    async def roll(self, ctx: commands.Context, *, diceroll: str) -> None:
-        """
-        Rola dados. Formatos suportados:
-          XdY         → padrão         ex: 4d6, d20
-          XdY!        → explosivo       ex: d6!, 3d10!
-          XdY!Z       → explode em Z+   ex: 3d10!8
-          XdYdZ       → drop lowest Z   ex: 4d6d1
-          N#XdY       → massa N vezes   ex: 6#4d6d1
-        """
-        diceroll = diceroll.lower().strip()
-
-        # ── Rolagem em massa: N#notação ───────────────────────────────────────
-        m = re.fullmatch(r"(\d+)#(.+)", diceroll)
-        if m:
-            await self._bulk_roll(ctx, int(m.group(1)), m.group(2))
-            return
-
-        # ── Rolagem simples ───────────────────────────────────────────────────
-        result = parse_roll(diceroll)
-        if result is None:
-            return await ctx.send(
-                "Formato inválido. Exemplos:\n"
-                "`!roll d20`, `!roll 4d6`, `!roll 4d6d1`, `!roll d6!`, `!roll 6#4d6d1`"
-            )
-        await ctx.send(format_result(result))
-    
     # ── Auto-Roll: Detecta se a mensagem é apenas um dado ──────────────────────
     
     @commands.Cog.listener()
@@ -57,9 +48,17 @@ class DadosCog(commands.Cog, name="Dados"):
         if message.author.bot:
             return
 
-        # Regex para detectar fórmulas de dados (ex: d20, 2d6, 3d10+5)
-        # Verifica se a mensagem começa com d ou número+d e não tem espaços
         content = message.content.lower().strip()
+
+        # Rolagem em massa: N#notação
+        m = re.fullmatch(r"(\d+)#(.+)", content)
+        if m:
+            # Verifica se a parte direita é uma notação de dados válida
+            if re.fullmatch(r"(\d*d\d+.*)", m.group(2)):
+                await self._bulk_roll(message, int(m.group(1)), m.group(2))
+            return
+
+        # Rolagem simples
         if re.fullmatch(r"(\d*d\d+.*)", content):
             result = parse_roll(content)
             if result:
@@ -68,15 +67,15 @@ class DadosCog(commands.Cog, name="Dados"):
     # ── Auxiliar para rolagem em massa ────────────────────────────────────────
 
     async def _bulk_roll(
-        self, ctx: commands.Context, num_rolls: int, notation: str
+        self, message: discord.Message, num_rolls: int, notation: str
     ) -> None:
         if num_rolls > BULK_ROLL_LIMIT:
-            return await ctx.send(f"Limite: {BULK_ROLL_LIMIT} rolagens em massa por vez.")
+            return await message.channel.send(f"Limite: {BULK_ROLL_LIMIT} rolagens em massa por vez.")
 
         # Valida a notação antes de repetir
         test = parse_roll(notation)
         if test is None:
-            return await ctx.send("Notação inválida para rolagem em massa.")
+            return await message.channel.send("Notação inválida para rolagem em massa.")
 
         totais = []
         lines  = []
@@ -92,7 +91,7 @@ class DadosCog(commands.Cog, name="Dados"):
             for k, v in sorted(counter.items(), key=lambda x: -x[1])[:5]
         )
 
-        await ctx.send(
+        await message.channel.send(
             f"📊 **Massa {num_rolls}× {notation.upper()}**\n"
             f"```\n{chr(10).join(lines)}```"
             f"Mais frequentes: {top_str}"
