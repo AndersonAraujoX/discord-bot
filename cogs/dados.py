@@ -6,6 +6,7 @@ Este Cog apenas interpreta os argumentos e formata as saídas.
 """
 
 import re
+import discord
 from collections import Counter
 
 from discord.ext import commands
@@ -48,6 +49,21 @@ class DadosCog(commands.Cog, name="Dados"):
                 "`!roll d20`, `!roll 4d6`, `!roll 4d6d1`, `!roll d6!`, `!roll 6#4d6d1`"
             )
         await ctx.send(format_result(result))
+    
+    # ── Auto-Roll: Detecta se a mensagem é apenas um dado ──────────────────────
+    
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        if message.author.bot:
+            return
+
+        # Regex para detectar fórmulas de dados (ex: d20, 2d6, 3d10+5)
+        # Verifica se a mensagem começa com d ou número+d e não tem espaços
+        content = message.content.lower().strip()
+        if re.fullmatch(r"(\d*d\d+.*)", content):
+            result = parse_roll(content)
+            if result:
+                await message.channel.send(format_result(result))
 
     # ── Auxiliar para rolagem em massa ────────────────────────────────────────
 
