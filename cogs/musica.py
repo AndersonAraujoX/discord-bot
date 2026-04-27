@@ -12,7 +12,7 @@ import discord
 import yt_dlp
 from discord.ext import commands
 
-from config import FFMPEG_OPTIONS, IDLE_TIMEOUT, YTDL_OPTIONS
+from config import FFMPEG_OPTIONS, IDLE_TIMEOUT, YTDL_OPTIONS, PLAYLISTS, RADIO_URL
 
 # Tipos de loop suportados
 LOOP_SONG  = "song"
@@ -27,11 +27,13 @@ class GuildMusicState:
     voice_client: Optional[discord.VoiceClient] = None
     current:      Optional[dict]         = None
     loop:         Optional[str]          = None   # LOOP_SONG | LOOP_QUEUE | None
+    radio_mode:   bool                   = False
 
     def clear(self) -> None:
         self.queue.clear()
         self.current = None
         self.loop    = None
+        self.radio_mode = False
 
 
 class MusicaCog(commands.Cog, name="Música"):
@@ -75,7 +77,12 @@ class MusicaCog(commands.Cog, name="Música"):
             )
         if "entries" in info:
             info = info["entries"][0]
-        return {"source": info["url"], "title": info["title"]}
+        return {
+            "source": info["url"], 
+            "title": info["title"],
+            "thumbnail": info.get("thumbnail", ""),
+            "webpage_url": info.get("webpage_url", "")
+        }
 
     async def _play_next(self, ctx: commands.Context) -> None:
         """Toca a próxima música da fila, aplicando a lógica de loop."""
@@ -95,7 +102,7 @@ class MusicaCog(commands.Cog, name="Música"):
         if not state.queue:
             state.current = None
             await ctx.send("A fila terminou. 🎵")
-            if state.loop != LOOP_QUEUE:
+            if state.loop != LOOP_QUEUE and not state.radio_mode:
                 await asyncio.sleep(IDLE_TIMEOUT)
                 if vc and not vc.is_playing():
                     await vc.disconnect()
@@ -113,7 +120,14 @@ class MusicaCog(commands.Cog, name="Música"):
                     self._play_next(ctx), self.bot.loop
                 ),
             )
-            await ctx.send(f"🎶 Tocando agora: **{song['title']}**")
+            embed = discord.Embed(
+                title="🎶 Tocando agora", 
+                description=f"**[{song['title']}]({song.get('webpage_url', '')})**", 
+                color=discord.Color.green()
+            )
+            if song.get("thumbnail"):
+                embed.set_thumbnail(url=song["thumbnail"])
+            await ctx.send(embed=embed)
         except Exception as exc:
             await ctx.send(f"Erro ao tocar música: `{exc}`")
             state.current = None
@@ -232,6 +246,34 @@ class MusicaCog(commands.Cog, name="Música"):
             await ctx.send("🔁 Loop **desligado**.")
         else:
             await ctx.send("Modo inválido. Use: `song`, `queue` ou `off`.")
+
+    @commands.command(name="radio")
+    async def radio(self, ctx: commands.Context) -> None:
+        """Alterna o modo rádio Lo-Fi 24/7."""
+        state = self._state(ctx.guild.id)
+        state.radio_mode = not state.radio_mode
+        
+        if state.radio_mode:
+            state.loop = LOOP_SONG
+            await ctx.send("📻 **Modo Rádio 24/7 Ativado!** O bot não vai se desconectar por inatividade.")
+            await self.play(ctx, query=RADIO_URL)
+        else:
+            state.loop = LOOP_OFF
+            await ctx.send("📻 **Modo Rádio Desativado.**")
+
+    @commands.command(name="playlist")
+    async def playlist(self, ctx: commands.Context, nome_playlist: str) -> None:
+        """Carrega uma playlist salva pelo Mestre (ex: !playlist batalha)."""
+        nome_playlist = nome_playlist.lower()
+        if nome_playlist not in PLAYLISTS:
+            await ctx.send(f"❌ Playlist `{nome_playlist}` não encontrada. Playlists disponíveis: " + ", ".join(PLAYLISTS.keys()))
+            return
+
+        links = PLAYLISTS[nome_playlist]
+        await ctx.send(f"📂 Carregando playlist **{nome_playlist.capitalize()}** com {len(links)} músicas...")
+        
+        for link in links:
+            await self.play(ctx, query=link)
 
 
 async def setup(bot: commands.Bot) -> None:

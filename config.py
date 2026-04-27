@@ -60,8 +60,20 @@ FFMPEG_OPTIONS: dict = {
     "options": "-vn -loglevel warning",
 }
 
+import json
+
 # ── Tempo de espera antes de sair do canal vazio (segundos) ───────────────────
 IDLE_TIMEOUT = 180
+
+# ── Playlists e Rádio ─────────────────────────────────────────────────────────
+PLAYLISTS_PATH = BASE_DIR / "playlists.json"
+PLAYLISTS = {}
+if PLAYLISTS_PATH.is_file():
+    with open(PLAYLISTS_PATH, "r", encoding="utf-8") as f:
+        PLAYLISTS = json.load(f)
+
+RADIO_URL = "lofi hip hop radio" # Query ou link direto da rádio
+
 
 # ── Limite de segurança para dados ───────────────────────────────────────────
 DICE_MAX_COUNT      = 100    # dados por rolagem
