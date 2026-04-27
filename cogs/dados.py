@@ -21,10 +21,13 @@ def load_rpg_data():
     if os.path.exists(RPG_DATA_FILE):
         try:
             with open(RPG_DATA_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if "party" not in data:
+                    data["party"] = {"gold": 0, "inventory": []}
+                return data
         except json.JSONDecodeError:
             pass
-    return {"users": {}}
+    return {"users": {}, "party": {"gold": 0, "inventory": []}}
 
 def save_rpg_data(data):
     with open(RPG_DATA_FILE, "w", encoding="utf-8") as f:
@@ -53,7 +56,10 @@ class DadosCog(commands.Cog, name="Dados"):
             "`/ficha_salvar <atributo> <valor>` — Salva um modificador (ex: destreza +3).\n"
             "`/teste <atributo>` — Rola 1d20 somando o seu modificador.\n"
             "`/macro_salvar <nome> <fórmula>` — Salva uma fórmula de dano ou ataque.\n"
-            "`/macro <nome>` — Rola a macro salva.\n\n"
+            "**Grupo (Inventário e Economia):**\n"
+            "`/loot_add <item>` — Adiciona item à carroça da party.\n"
+            "`/gold <valor>` — Soma ou subtrai (ex: -50) ouro coletivo.\n"
+            "`/grupo` — Lista o ouro e o inventário do grupo.\n\n"
             "**Iniciativa:**\n"
             "`/iniciativa_iniciar` — Abre a contagem no canal.\n"
             "`/iniciativa_rolar` — Rola seu d20 + destreza (se houver) para a iniciativa.\n"
@@ -130,6 +136,47 @@ class DadosCog(commands.Cog, name="Dados"):
             await interaction.response.send_message(msg)
         else:
             await interaction.response.send_message("❌ Erro ao calcular a macro salva.", ephemeral=True)
+
+    # ── Grupo e Economia ──────────────────────────────────────────────────────
+
+    @app_commands.command(name="loot_add", description="Adiciona um item ao inventário coletivo da Party.")
+    async def loot_add(self, interaction: discord.Interaction, item: str) -> None:
+        data = load_rpg_data()
+        data["party"]["inventory"].append(item)
+        save_rpg_data(data)
+        await interaction.response.send_message(f"🎒 **{item}** foi adicionado à carroça do grupo!")
+
+    @app_commands.command(name="gold", description="Soma (ou subtrai se for negativo) o ouro do grupo.")
+    async def gold(self, interaction: discord.Interaction, valor: int) -> None:
+        data = load_rpg_data()
+        
+        antigo = data["party"]["gold"]
+        novo = antigo + valor
+        data["party"]["gold"] = novo
+        save_rpg_data(data)
+        
+        acao = "recebeu" if valor >= 0 else "gastou"
+        modulo = abs(valor)
+        
+        await interaction.response.send_message(f"🪙 O grupo {acao} **{modulo}** moedas de ouro.\nSaldo atual da party: **{novo}** ouro.")
+
+    @app_commands.command(name="grupo", description="Lista todo o ouro e inventário da Party.")
+    async def grupo(self, interaction: discord.Interaction) -> None:
+        data = load_rpg_data()
+        party = data["party"]
+        
+        embed = discord.Embed(title="⛺ Acampamento do Grupo", color=discord.Color.gold())
+        embed.add_field(name="🪙 Ouro Coletivo", value=f"**{party['gold']}** moedas", inline=False)
+        
+        inv = party["inventory"]
+        if inv:
+            itens = "\n".join(f"• {item}" for item in inv)
+        else:
+            itens = "A carroça está vazia."
+            
+        embed.add_field(name="🎒 Inventário (Carroça)", value=itens, inline=False)
+        
+        await interaction.response.send_message(embed=embed)
 
     # ── Iniciativa ────────────────────────────────────────────────────────────
 
