@@ -4,22 +4,21 @@ cogs/geral.py — Eventos globais e respostas simples sem prefixo
 """
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 
 HELP_TEXT = (
-    "**Meus Comandos:**\n"
-    "🎵 **Música (`!`):** `!play <nome ou link>`, `!skip`, `!pause`, `!resume`, "
-    "`!queue`, `!join`, `!leave`, `!loop <song/queue/off>`\n"
-    "   *(YouTube, SoundCloud, etc.)*\n"
-    "🎲 **Dados (`!roll`):** `!roll 4d6`, `!roll d20!`, `!roll 4d6d1`, `!roll 6#4d6d1`\n"
+    "**Meus Comandos (Agora com barra `/`):**\n"
+    "🎵 **Música:** `/play <nome ou link>`, `/skip`, `/pause`, `/resume`, "
+    "`/queue`, `/radio`, `/playlist <nome>`, `/loop <song/queue/off>`\n"
+    "🎲 **Dados e RPG:** `/dados`, `/teste`, `/macro`, `/macro_salvar`, `/iniciativa_rolar`\n"
     "🤖 **RPG com IA:** `!rpg_start` inicia Rilem/Miler · `!rpg_stop` encerra\n"
     "   *(Após iniciar, mencione o bot para interagir)*"
 )
 
 # Mapa de palavras-chave → resposta (sem prefixo)
 _RESPOSTAS_EXATAS: dict[str, str] = {
-    "ping": "Pong! 🏓",
     "oi":   None,   # resposta especial — usa mention
     "olá":  None,
     "ola":  None,
@@ -31,6 +30,13 @@ class GeralCog(commands.Cog, name="Geral"):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+    # ── Slash Commands ────────────────────────────────────────────────────────
+    
+    @app_commands.command(name="ping", description="Verifica se o bot está online e sua latência.")
+    async def ping(self, interaction: discord.Interaction) -> None:
+        latency = round(self.bot.latency * 1000)
+        await interaction.response.send_message(f"Pong! 🏓 Latência: {latency}ms")
 
     # ── Eventos ───────────────────────────────────────────────────────────────
 
@@ -45,20 +51,14 @@ class GeralCog(commands.Cog, name="Geral"):
         if message.author == self.bot.user:
             return
 
-        # RPG é tratado pelo RpgCog — apenas propaga o evento aqui
         content = message.content.lower().strip()
 
-        if content == "ping":
-            await message.channel.send("Pong! 🏓")
-
-        elif content in ("oi", "olá", "ola"):
+        if content in ("oi", "olá", "ola"):
             await message.channel.send(f"Olá, {message.author.mention}! Tudo bem?")
 
-        elif "ajuda" in content and not message.content.startswith("!"):
+        elif "ajuda" in content and not message.content.startswith("/"):
             await message.channel.send(HELP_TEXT)
 
-        # O discord.py já processa os comandos automaticamente, 
-        # não precisamos chamar process_commands aqui.
         pass
 
 

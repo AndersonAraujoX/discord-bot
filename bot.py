@@ -13,20 +13,25 @@ from config import DISCORD_TOKEN
 from cogs import COGS
 
 
+class RilemBot(commands.Bot):
+    async def setup_hook(self) -> None:
+        for cog in COGS:
+            await self.load_extension(cog)
+            print(f"   ✔ Cog carregado: {cog}")
+        
+        # Sincroniza a árvore de comandos Slash
+        await self.tree.sync()
+        print("   ✔ Árvore de Slash Commands sincronizada!")
+
 def create_bot() -> commands.Bot:
     intents = discord.Intents.default()
     intents.message_content = True
     intents.voice_states    = True
-    return commands.Bot(command_prefix="!", intents=intents)
-
+    return RilemBot(command_prefix="!", intents=intents)
 
 async def main() -> None:
     bot = create_bot()
-
     async with bot:
-        for cog in COGS:
-            await bot.load_extension(cog)
-            print(f"   ✔ Cog carregado: {cog}")
         await bot.start(DISCORD_TOKEN)
 
 
