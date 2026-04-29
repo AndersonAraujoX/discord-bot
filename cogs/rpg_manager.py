@@ -23,6 +23,16 @@ def load_rpg_tables():
             pass
     return {"encounters": {}, "loot": {}, "facts": []}
 
+class TurnoView(discord.ui.View):
+    def __init__(self, cog, channel_id):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.channel_id = channel_id
+
+    @discord.ui.button(label="Próximo Turno", style=discord.ButtonStyle.green, emoji="⏭️")
+    async def next_turn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._avancar_turno(interaction)
+
 class RpgManagerCog(commands.Cog, name="RPG"):
     """Sistema unificado de mecânicas de RPG (Dados, Fichas, Combate e Exploração)."""
 
@@ -120,17 +130,27 @@ class RpgManagerCog(commands.Cog, name="RPG"):
         save_rpg_data(data)
         await interaction.response.send_message(f"🏥 HP de **{alvo.capitalize()}** definido para **{valor}**.")
 
-    @hp_group.command(name="mudar", description="Adiciona ou retira HP (use valores negativos para dano).")
-    async def hp_mudar(self, interaction: discord.Interaction, alvo: str, valor: int) -> None:
+    @hp_group.command(name="dano", description="Aplica dano a um alvo.")
+    async def hp_dano(self, interaction: discord.Interaction, alvo: str, valor: int) -> None:
+        await self._hp_apply(interaction, alvo, -abs(valor))
+
+    @hp_group.command(name="cura", description="Aplica cura a um alvo.")
+    async def hp_cura(self, interaction: discord.Interaction, alvo: str, valor: int) -> None:
+        await self._hp_apply(interaction, alvo, abs(valor))
+
+    async def _hp_apply(self, interaction, alvo, valor):
         data = load_rpg_data()
         alvo_l = alvo.lower()
-        if alvo_l not in data["hp"]: return await interaction.response.send_message("❌ Alvo sem HP definido.", ephemeral=True)
+        if alvo_l not in data["hp"]:
+            return await interaction.response.send_message(f"❌ Alvo `{alvo}` não encontrado.", ephemeral=True)
         
         hp = data["hp"][alvo_l]
         hp["atual"] = max(0, min(hp["max"], hp["atual"] + valor))
         save_rpg_data(data)
         
-        msg = f"{'✨ Cura' if valor > 0 else '💥 Dano'} em **{alvo.capitalize()}**: {abs(valor)}\n{self._get_hp_bar(hp['atual'], hp['max'])}"
+        emoji = "💥" if valor < 0 else "✨"
+        acao = "Dano" if valor < 0 else "Cura"
+        msg = f"{emoji} **{acao}** em **{alvo.capitalize()}**: {abs(valor)}\n{self._get_hp_bar(hp['atual'], hp['max'])}"
         if hp["atual"] == 0: msg += f"\n\n💀 **ALERTA:** {alvo.capitalize()} caiu!"
         await interaction.response.send_message(msg)
 
@@ -146,7 +166,24 @@ class RpgManagerCog(commands.Cog, name="RPG"):
     # ── Combate: Ataque & Iniciativa ──────────────────────────────────────────
 
     @app_commands.command(name="atacar", description="Rola ataque e compara com a CA.")
-    async def atacar(self, interaction: discord.Interaction, bonus: int, ca: int, alvo: str = "Alvo") -> None:
+    @app_commands.describe(bonus_ou_atributo="Bônus numérico (+5) ou nome de um atributo da ficha.")
+    async def atacar(self, interaction: discord.Interaction, bonus_ou_atributo: str, ca: int, alvo: str = "Alvo") -> None:
+        # Tenta pegar da ficha
+        data = load_rpg_data()
+        bonus = 0
+        attr_name = bonus_ou_atributo.lower()
+        char_data = data.get("users", {}).get(str(interaction.user.id), {}).get("fichas", {})
+        
+        if attr_name in char_data:
+            bonus = char_data[attr_name]
+            label = f" (usando {attr_name.capitalize()})"
+        else:
+            try:
+                bonus = int(bonus_ou_atributo)
+                label = ""
+            except ValueError:
+                return await interaction.response.send_message(f"❌ `{bonus_ou_atributo}` não é um número nem um atributo válido.", ephemeral=True)
+
         d20 = random.randint(1, 20)
         total = d20 + bonus
         acertou = total >= ca
@@ -156,17 +193,43 @@ class RpgManagerCog(commands.Cog, name="RPG"):
         if d20 == 1: res, cor = "💀 FALHA CRÍTICA!", discord.Color.dark_gray()
         
         embed = discord.Embed(title=f"⚔️ Ataque contra {alvo}", color=cor)
-        embed.add_field(name="Rolagem", value=f"🎲 {d20} + {bonus} = **{total}**")
+        embed.add_field(name="Rolagem", value=f"🎲 {d20} + {bonus}{label} = **{total}**")
         embed.add_field(name="Defesa (CA)", value=f"🛡️ {ca}")
         embed.add_field(name="Resultado", value=res, inline=False)
         await interaction.response.send_message(embed=embed)
+
+    async def _avancar_turno(self, interaction: discord.Interaction):
+        cid = interaction.channel.id
+        if cid not in self.iniciativas or not self.iniciativas[cid]["players"]:
+            return await interaction.response.send_message("Sem combate ativo.", ephemeral=True)
+        
+        ini = self.iniciativas[cid]
+        ordenada = sorted(ini["players"].values(), key=lambda x: x["roll"], reverse=True)
+        ini["idx"] = (ini["idx"] + 1) % len(ordenada)
+        atual = ordenada[ini["idx"]]
+        
+        embed = discord.Embed(title="🛡️ Ordem de Combate", color=discord.Color.blue())
+        lista_str = []
+        for i, p in enumerate(ordenada):
+            seta = "➡️ " if i == ini["idx"] else "      "
+            lista_str.append(f"{seta}**{p['roll']}** - {p['name']}")
+        
+        embed.description = "\n".join(lista_str)
+        embed.add_field(name="Vez de:", value=atual['mention'])
+        
+        view = TurnoView(self, cid)
+        
+        if interaction.response.is_done():
+            await interaction.edit_original_response(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view)
 
     iniciativa_group = app_commands.Group(name="iniciativa", description="Gestão de combate.")
 
     @iniciativa_group.command(name="iniciar", description="Abre o combate no canal.")
     async def ini_start(self, interaction: discord.Interaction) -> None:
         self.iniciativas[interaction.channel.id] = {"idx": -1, "players": {}}
-        await interaction.response.send_message("⚔️ **Combate iniciado!** Usem `/iniciativa rolar`.")
+        await interaction.response.send_message("⚔️ **Combate iniciado!** Usem `/iniciativa rolar` para entrar na briga.")
 
     @iniciativa_group.command(name="rolar", description="Entra no combate.")
     async def ini_roll(self, interaction: discord.Interaction) -> None:
@@ -179,16 +242,9 @@ class RpgManagerCog(commands.Cog, name="RPG"):
         self.iniciativas[cid]["players"][interaction.user.id] = {"name": interaction.user.display_name, "roll": roll, "mention": interaction.user.mention}
         await interaction.response.send_message(f"🎲 {interaction.user.mention} rolou **{roll}**!")
 
-    @app_commands.command(name="turno", description="Avança para o próximo combatente.")
-    async def turn_next(self, interaction: discord.Interaction) -> None:
-        cid = interaction.channel.id
-        if cid not in self.iniciativas or not self.iniciativas[cid]["players"]: return await interaction.response.send_message("Sem combate ativo.")
-        
-        ini = self.iniciativas[cid]
-        ordenada = sorted(ini["players"].values(), key=lambda x: x["roll"], reverse=True)
-        ini["idx"] = (ini["idx"] + 1) % len(ordenada)
-        atual = ordenada[ini["idx"]]
-        await interaction.response.send_message(f"🛡️ **Vez de:** {atual['mention']}!")
+    @app_commands.command(name="turno", description="Exibe a ordem e avança para o próximo combatente.")
+    async def turn_cmd(self, interaction: discord.Interaction) -> None:
+        await self._avancar_turno(interaction)
 
     # ── Exploração & Mestrado ─────────────────────────────────────────────────
 
