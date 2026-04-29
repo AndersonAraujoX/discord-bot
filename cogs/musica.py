@@ -21,6 +21,54 @@ LOOP_SONG  = "song"
 LOOP_QUEUE = "queue"
 LOOP_OFF   = None
 
+AMBIENT_SOUNDS = {
+    "Chuva": "https://www.youtube.com/watch?v=mPZkdNFkNps",
+    "Taverna": "https://www.youtube.com/watch?v=hBpcovn0kb4",
+    "Floresta": "https://www.youtube.com/watch?v=xNN7iTA57jM",
+    "Combate": "https://www.youtube.com/watch?v=17X2fB-M880",
+    "Suspense": "https://www.youtube.com/watch?v=S_S7p6tFmXU"
+}
+
+class MusicControlView(discord.ui.View):
+    def __init__(self, cog, guild_id):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="⏯️", style=discord.ButtonStyle.grey)
+    async def play_pause(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = self.cog._state(self.guild_id)
+        if state.voice_client:
+            if state.voice_client.is_playing():
+                state.voice_client.pause()
+                await interaction.response.send_message("Pausado.", ephemeral=True)
+            elif state.voice_client.is_paused():
+                state.voice_client.resume()
+                await interaction.response.send_message("Retomado.", ephemeral=True)
+
+    @discord.ui.button(label="⏭️ Próxima", style=discord.ButtonStyle.grey)
+    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = self.cog._state(self.guild_id)
+        if state.voice_client and state.voice_client.is_playing():
+            state.voice_client.stop()
+            await interaction.response.send_message("Pulada.", ephemeral=True)
+
+    @discord.ui.button(label="🔁 Loop", style=discord.ButtonStyle.grey)
+    async def toggle_loop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = self.cog._state(self.guild_id)
+        if state.loop == LOOP_OFF: state.loop = LOOP_SONG
+        elif state.loop == LOOP_SONG: state.loop = LOOP_QUEUE
+        else: state.loop = LOOP_OFF
+        await interaction.response.send_message(f"Loop: {state.loop or 'OFF'}", ephemeral=True)
+
+    @discord.ui.button(label="⏹️ Parar", style=discord.ButtonStyle.red)
+    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = self.cog._state(self.guild_id)
+        state.clear()
+        if state.voice_client:
+            await state.voice_client.disconnect()
+        await interaction.response.send_message("Música encerrada.", ephemeral=True)
+
 
 @dataclass
 class GuildMusicState:
@@ -31,6 +79,7 @@ class GuildMusicState:
     current:      Optional[dict]         = None
     loop:         Optional[str]          = None   # LOOP_SONG | LOOP_QUEUE | None
     radio_mode:   bool                   = False
+    volume:       float                  = 1.0
 
     def clear(self) -> None:
         self.queue.clear()
@@ -102,6 +151,7 @@ class MusicaCog(commands.Cog, name="Música"):
 
         try:
             source = discord.FFmpegPCMAudio(song["source"], **FFMPEG_OPTIONS)
+            source = discord.PCMVolumeTransformer(source, volume=state.volume)
             vc.play(
                 source,
                 after=lambda _: asyncio.run_coroutine_threadsafe(
@@ -117,7 +167,8 @@ class MusicaCog(commands.Cog, name="Música"):
                 embed.set_thumbnail(url=song["thumbnail"])
             
             if state.text_channel:
-                await state.text_channel.send(embed=embed)
+                view = MusicControlView(self, guild_id)
+                await state.text_channel.send(embed=embed, view=view)
         except Exception as exc:
             if state.text_channel:
                 await state.text_channel.send(f"Erro ao tocar música: `{exc}`")
@@ -313,6 +364,28 @@ class MusicaCog(commands.Cog, name="Música"):
             vc = state.voice_client
             if vc and not vc.is_playing() and not vc.is_paused():
                 await self._play_next(interaction.guild.id)
+
+    @app_commands.command(name="ambiente", description="Toca sons de ambiente para imersão (Chuva, Taverna, etc).")
+    @app_commands.choices(som=[
+        app_commands.Choice(name=k, value=v) for k, v in AMBIENT_SOUNDS.items()
+    ])
+    async def ambiente(self, interaction: discord.Interaction, som: app_commands.Choice[str]) -> None:
+        await self.play(interaction, som.value)
+        state = self._state(interaction.guild.id)
+        state.loop = LOOP_SONG # Força loop na música de ambiente
+        await interaction.channel.send(f"🌌 **Clima alterado para:** {som.name}")
+
+    @app_commands.command(name="volume", description="Ajusta o volume da música (0-100).")
+    async def volume(self, interaction: discord.Interaction, nivel: int) -> None:
+        state = self._state(interaction.guild.id)
+        state.volume = nivel / 100
+        
+        if state.voice_client and state.voice_client.source:
+            if not isinstance(state.voice_client.source, discord.PCMVolumeTransformer):
+                state.voice_client.source = discord.PCMVolumeTransformer(state.voice_client.source)
+            state.voice_client.source.volume = state.volume
+        
+        await interaction.response.send_message(f"🔊 Volume ajustado para **{nivel}%**")
 
 
 async def setup(bot: commands.Bot) -> None:
