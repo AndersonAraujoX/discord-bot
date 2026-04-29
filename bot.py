@@ -15,13 +15,16 @@ from cogs import COGS
 
 class RilemBot(commands.Bot):
     async def setup_hook(self) -> None:
+        print("🚀 Inicializando Cogs...")
         for cog in COGS:
-            await self.load_extension(cog)
-            print(f"   ✔ Cog carregado: {cog}")
+            try:
+                await self.load_extension(cog)
+                print(f"   ✔ {cog}")
+            except Exception as e:
+                print(f"   ❌ Erro em {cog}: {e}")
         
-        # Sincroniza a árvore de comandos Slash
         await self.tree.sync()
-        print("   ✔ Árvore de Slash Commands sincronizada!")
+        print("✅ Árvore de comandos sincronizada!")
 
 def create_bot() -> commands.Bot:
     intents = discord.Intents.default()

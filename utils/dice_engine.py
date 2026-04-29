@@ -53,9 +53,9 @@ def _roll_exploding(n: int, faces: int, explode_on: int) -> list[int]:
 
 # ── Parser de notações ────────────────────────────────────────────────────────
 
-# Padrão: (N?)d(FACES)(drop?)(explode?)
-_RE_DROP    = re.compile(r"^(\d+)d(\d+)d(\d+)$",      re.IGNORECASE)
-_RE_EXPLODE = re.compile(r"^(\d*)d(\d+)(!(\d*))?$",   re.IGNORECASE)
+# Padrão: (N?)d(FACES)(drop?)(explode?)(mod?)
+_RE_DROP    = re.compile(r"^(\d+)d(\d+)d(\d+)([+-]\d+)?$",      re.IGNORECASE)
+_RE_EXPLODE = re.compile(r"^(\d*)d(\d+)(!(\d*))?([+-]\d+)?$",   re.IGNORECASE)
 
 
 def parse_roll(notation: str) -> Optional[RollResult]:
@@ -65,16 +65,20 @@ def parse_roll(notation: str) -> Optional[RollResult]:
 
     Formatos suportados:
       XdY          → padrão (ex: 4d6, d20)
+      XdY+K        → com bônus (ex: 1d20+5)
+      XdY-K        → com penalidade (ex: 1d20-2)
       XdY!         → explosivo no máximo (ex: d6!)
       XdY!Z        → explosivo a partir de Z (ex: 3d10!8)
       XdYdZ        → drop: rola X dados, descarta os Z menores (ex: 4d6d1)
     """
-    notation = notation.strip().lower()
+    notation = notation.strip().replace(" ", "").lower()
 
-    # ── Drop: XdYdZ ──────────────────────────────────────────────────────────
+    # ── Drop: XdYdZ[+-K] ─────────────────────────────────────────────────────
     m = _RE_DROP.fullmatch(notation)
     if m:
         n, faces, drop = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        mod = int(m.group(4)) if m.group(4) else 0
+        
         if drop >= n:
             return None   # inválido: descartaria tudo
         if n > DICE_MAX_COUNT or faces > DICE_MAX_FACES:
@@ -83,15 +87,19 @@ def parse_roll(notation: str) -> Optional[RollResult]:
         rolls_sorted = sorted(random.randint(1, faces) for _ in range(n))
         dropped = rolls_sorted[:drop]
         kept    = rolls_sorted[drop:]
+        
+        final_notation = f"{n}d{faces}d{drop}"
+        if mod: final_notation += f"{mod:+d}"
+
         return RollResult(
-            notation=f"{n}d{faces}d{drop}",
+            notation=final_notation,
             rolls=rolls_sorted,
             kept=kept,
             dropped=dropped,
-            total=sum(kept),
+            total=sum(kept) + mod,
         )
 
-    # ── Padrão / Explosivo: (N?)dY(!Z?) ──────────────────────────────────────
+    # ── Padrão / Explosivo: (N?)dY(!Z?)[+-K] ──────────────────────────────────
     m = _RE_EXPLODE.fullmatch(notation)
     if m:
         n        = int(m.group(1)) if m.group(1) else 1
@@ -99,6 +107,7 @@ def parse_roll(notation: str) -> Optional[RollResult]:
         explode  = m.group(3) is not None
         expl_val = m.group(4)
         explode_on = int(expl_val) if (expl_val and expl_val != "") else faces
+        mod      = int(m.group(5)) if m.group(5) else 0
 
         if n < 1 or faces < 2 or n > DICE_MAX_COUNT or faces > DICE_MAX_FACES:
             return None
@@ -108,12 +117,16 @@ def parse_roll(notation: str) -> Optional[RollResult]:
         else:
             rolls = [random.randint(1, faces) for _ in range(n)]
 
+        final_notation = f"{n}d{faces}"
+        if explode: final_notation += f"!{explode_on if explode_on != faces else ''}"
+        if mod: final_notation += f"{mod:+d}"
+
         return RollResult(
-            notation=f"{n}d{faces}" + (f"!{explode_on if explode_on != faces else ''}" if explode else ""),
+            notation=final_notation,
             rolls=rolls,
             kept=rolls,
             dropped=[],
-            total=sum(rolls),
+            total=sum(rolls) + mod,
             exploded=explode,
         )
 
