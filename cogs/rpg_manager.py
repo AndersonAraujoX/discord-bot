@@ -237,7 +237,45 @@ class RpgManagerCog(commands.Cog, name="RPG"):
         embed.add_field(name="🎒 Inventário", value=inv, inline=False)
         await interaction.response.send_message(embed=embed)
 
+    # ── Mural de Missões ──────────────────────────────────────────────────────
+
+    @app_commands.command(name="mural_setup", description="Cria o canal #mural-de-missoes e configura permissões.")
+    @app_commands.checks.has_permissions(manage_channels=True)
+    async def mural_setup(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(send_messages=False),
+            guild.me: discord.PermissionOverwrite(send_messages=True),
+        }
+        
+        # Procura se já existe
+        channel = discord.utils.get(guild.text_channels, name="mural-de-missoes")
+        if not channel:
+            channel = await guild.create_text_channel("mural-de-missoes", overwrites=overwrites)
+            await interaction.response.send_message(f"✅ Canal {channel.mention} criado e bloqueado para jogadores!")
+        else:
+            await channel.edit(overwrites=overwrites)
+            await interaction.response.send_message(f"✅ Permissões do canal {channel.mention} atualizadas!")
+
+    @app_commands.command(name="missao_postar", description="Posta um gancho de missão no mural com votação.")
+    @app_commands.describe(titulo="Título da missão", descricao="O que está acontecendo?", recompensa="O que ganharão?")
+    async def missao_postar(self, interaction: discord.Interaction, titulo: str, descricao: str, recompensa: str) -> None:
+        channel = discord.utils.get(interaction.guild.text_channels, name="mural-de-missoes")
+        if not channel:
+            return await interaction.response.send_message("❌ Canal `#mural-de-missoes` não encontrado. Use `/mural_setup` primeiro.", ephemeral=True)
+
+        embed = discord.Embed(title=f"📜 MISSÃO: {titulo}", description=descricao, color=discord.Color.dark_gold())
+        embed.add_field(name="💰 Recompensa", value=recompensa)
+        embed.set_footer(text="Jogadores, votem com 👍 ou 👎 para decidir o rumo!")
+        
+        msg = await channel.send(embed=embed)
+        await msg.add_reaction("👍")
+        await msg.add_reaction("👎")
+        
+        await interaction.response.send_message(f"✅ Missão postada em {channel.mention}!")
+
     # ── Listener para dados diretos (ex: d20) ──────────────────────────────────
+
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
