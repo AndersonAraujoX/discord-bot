@@ -1,0 +1,22 @@
+{
+  "encounters": {
+    "floresta": ["Lobo Atroz", "Goblin batedor", "Urso-coruja", "Aranha gigante", "Bando de Pixies", "Ent ancião"],
+    "deserto": ["Escorpião de areia", "Bandidos nômades", "Múmia menor", "Verme de areia", "Esfinge (enigma)"],
+    "caverna": ["Morcegos gigantes", "Esqueleto guerreiro", "Troll de pedra", "Devorador de intelecto", "Kobolds trapaceiros"],
+    "pântano": ["Jacaré gigante", "Bruxa da floresta", "Zumbi da lama", "Hidra (raro)", "Fogo fátuo"]
+  },
+  "loot": {
+    "1": ["Moeda de Cobre (1d10)", "Adaga enferrujada", "Pão de viagem", "Corda de cânhamo", "Pequena gema fosca"],
+    "5": ["Moedas de Ouro (2d20)", "Poção de Cura", "Espada Curta +1", "Pergaminho de Míssil Mágico", "Escudo de madeira reforçado"],
+    "10": ["Saco de Ouro (5d100)", "Anel de Proteção", "Machado de Guerra Flamejante", "Cajado do Mestre", "Poção de Invisibilidade"],
+    "20": ["Artefato Antigo", "Armadura de Placas de Adamante", "Espada Larga Vorpal", "Cetro de Desejo", "Gema da Alma"]
+  },
+  "facts": [
+    "O mestre sempre tem razão (mesmo quando erra).",
+    "Nunca divida o grupo.",
+    "O dragão está dormindo... por enquanto.",
+    "Sempre verifique armadilhas antes de abrir o baú.",
+    "A taverna 'O Porco Alado' tem a melhor cerveja da região.",
+    "Diz a lenda que o Rilem uma vez derrotou um exército com uma colher."
+  ]
+}

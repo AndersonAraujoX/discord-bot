@@ -5,4 +5,5 @@ COGS = [
     "cogs.musica",
     "cogs.rpg",
     "cogs.dados",
+    "cogs.rpg_utils",
 ]
