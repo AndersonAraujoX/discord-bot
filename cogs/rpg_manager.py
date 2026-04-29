@@ -3,6 +3,8 @@ import json
 import os
 import random
 import discord
+import asyncio
+from datetime import datetime
 from collections import Counter
 from typing import List, Optional
 from discord import app_commands
@@ -378,6 +380,96 @@ class RpgManagerCog(commands.Cog, name="RPG"):
         embed.add_field(name="🪙 Ouro", value=f"**{data['party']['gold']}**")
         embed.add_field(name="🎒 Inventário", value=inv, inline=False)
         await interaction.response.send_message(embed=embed)
+
+    # ── Sessão & Mundo ───────────────────────────────────────────────────────
+
+    sessao_group = app_commands.Group(name="sessao", description="Gestão de sessões de RPG.")
+
+    @sessao_group.command(name="iniciar", description="Inicia o registro de uma nova sessão.")
+    async def sessao_iniciar(self, interaction: discord.Interaction) -> None:
+        data = load_rpg_data()
+        if data["sessions"]["active"]:
+            return await interaction.response.send_message("Já existe uma sessão ativa! Encerre-a primeiro com `/sessao encerrar`.", ephemeral=True)
+        
+        data["sessions"]["active"] = {
+            "start": datetime.now().isoformat(),
+            "notes": []
+        }
+        save_rpg_data(data)
+        await interaction.response.send_message("🎬 **Sessão iniciada!** Que a sorte esteja com vocês.")
+
+    @sessao_group.command(name="nota", description="Adiciona uma nota/registro à sessão atual.")
+    async def sessao_nota(self, interaction: discord.Interaction, texto: str) -> None:
+        data = load_rpg_data()
+        if not data["sessions"]["active"]:
+            return await interaction.response.send_message("Nenhuma sessão ativa. Inicie com `/sessao iniciar`.", ephemeral=True)
+        
+        data["sessions"]["active"]["notes"].append(texto)
+        save_rpg_data(data)
+        await interaction.response.send_message(f"📝 Nota salva: *{texto}*")
+
+    @sessao_group.command(name="encerrar", description="Finaliza a sessão ativa e salva no histórico.")
+    async def sessao_encerrar(self, interaction: discord.Interaction) -> None:
+        data = load_rpg_data()
+        active = data["sessions"]["active"]
+        if not active:
+            return await interaction.response.send_message("Nenhuma sessão ativa para encerrar.", ephemeral=True)
+        
+        start_dt = datetime.fromisoformat(active["start"])
+        end_dt = datetime.now()
+        duration = end_dt - start_dt
+        
+        active["end"] = end_dt.isoformat()
+        active["duration"] = str(duration).split(".")[0] # H:M:S
+        data["sessions"]["history"].append(active)
+        data["sessions"]["active"] = None
+        
+        save_rpg_data(data)
+        await interaction.response.send_message(f"🏁 **Sessão encerrada!**\n⏱️ Duração: `{active['duration']}`\n📝 Notas salvas: {len(active['notes'])}")
+
+    @sessao_group.command(name="historico", description="Lista o histórico de sessões passadas.")
+    async def sessao_historico(self, interaction: discord.Interaction) -> None:
+        data = load_rpg_data()
+        hist = data["sessions"]["history"]
+        if not hist: return await interaction.response.send_message("Nenhuma sessão no histórico.")
+        
+        embed = discord.Embed(title="📜 Crônicas de Rilem", color=discord.Color.dark_gold())
+        for i, s in enumerate(hist[-5:]): # Mostra as últimas 5
+            data_str = datetime.fromisoformat(s["start"]).strftime("%d/%m/%Y")
+            notes = "\n".join(f"- {n}" for n in s["notes"][:3]) or "Sem notas."
+            embed.add_field(name=f"Sessão {i+1} ({data_str})", value=f"Duração: {s['duration']}\n{notes}", inline=False)
+        
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="dia", description="Avança ou define o dia no calendário ficcional.")
+    async def dia(self, interaction: discord.Interaction, avancar: int = 1) -> None:
+        data = load_rpg_data()
+        cal = data["calendar"]
+        cal["day"] += avancar
+        while cal["day"] > 30:
+            cal["day"] -= 30
+            cal["month"] += 1
+        while cal["month"] > 12:
+            cal["month"] -= 12
+            cal["year"] += 1
+            
+        save_rpg_data(data)
+        await interaction.response.send_message(f"📅 O tempo passa... Hoje é dia **{cal['day']}**, mês **{cal['month']}** do ano **{cal['year']}**.")
+
+    @app_commands.command(name="timer", description="Inicia um timer regressivo no canal.")
+    async def timer(self, interaction: discord.Interaction, segundos: int) -> None:
+        if segundos > 300: return await interaction.response.send_message("Limite de 5 minutos (300s).", ephemeral=True)
+        
+        await interaction.response.send_message(f"⏳ Timer iniciado: **{segundos}s**")
+        msg = await interaction.original_response()
+        
+        for i in range(segundos - 1, -1, -1):
+            await asyncio.sleep(1)
+            if i % 5 == 0 or i < 5: 
+                await msg.edit(content=f"⏳ Timer: **{i}s**")
+        
+        await msg.edit(content="⏰ **O TEMPO ACABOU!**")
+        await interaction.channel.send(f"{interaction.user.mention} ⌛ Tempo esgotado!")
 
     # ── Mural de Missões ──────────────────────────────────────────────────────
 
