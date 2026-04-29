@@ -11,22 +11,28 @@ def load_rpg_data():
                 data = json.load(f)
                 # Garante chaves básicas
                 if "party" not in data:
-                    data["party"] = {"gold": 0, "inventory": []}
+                    data["party"] = {"gold": 0, "inventory": [], "xp": 0, "level": 1}
+                if "xp" not in data["party"]: data["party"]["xp"] = 0
+                if "level" not in data["party"]: data["party"]["level"] = 1
+                
                 if "users" not in data:
                     data["users"] = {}
                 if "hp" not in data:
                     data["hp"] = {}
                 if "statuses" not in data:
                     data["statuses"] = {}
+                if "stats" not in data:
+                    data["stats"] = {"crits": {}}
                 return data
         except json.JSONDecodeError:
             pass
             
     return {
         "users": {}, 
-        "party": {"gold": 0, "inventory": []},
+        "party": {"gold": 0, "inventory": [], "xp": 0, "level": 1},
         "hp": {},
-        "statuses": {}
+        "statuses": {},
+        "stats": {"crits": {}}
     }
 
 def save_rpg_data(data):

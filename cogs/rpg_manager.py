@@ -12,6 +12,11 @@ from config import BULK_ROLL_LIMIT
 from utils.dice_engine import format_result, parse_roll
 from utils.storage import load_rpg_data, save_rpg_data
 
+XP_TABLE = {
+    1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500, 
+    6: 14000, 7: 23000, 8: 34000, 9: 48000, 10: 64000
+}
+
 TABLES_FILE = "rpg_tables.json"
 
 def load_rpg_tables():
@@ -189,7 +194,9 @@ class RpgManagerCog(commands.Cog, name="RPG"):
         acertou = total >= ca
         cor = discord.Color.green() if acertou else discord.Color.red()
         res = "✅ ACERTOU!" if acertou else "❌ ERROU!"
-        if d20 == 20: res, cor = "🔥 CRÍTICO!", discord.Color.gold()
+        if d20 == 20: 
+            res, cor = "🔥 CRÍTICO!", discord.Color.gold()
+            self._record_crit(interaction.user)
         if d20 == 1: res, cor = "💀 FALHA CRÍTICA!", discord.Color.dark_gray()
         
         embed = discord.Embed(title=f"⚔️ Ataque contra {alvo}", color=cor)
@@ -270,6 +277,85 @@ class RpgManagerCog(commands.Cog, name="RPG"):
 
     # ── Grupo & Economia ──────────────────────────────────────────────────────
 
+    # ── Grupo & Economia ──────────────────────────────────────────────────────
+
+    @app_commands.command(name="xp", description="Gerencia a experiência da party.")
+    @app_commands.describe(valor="Quantidade de XP para adicionar (ou negativo para remover)")
+    async def xp(self, interaction: discord.Interaction, valor: Optional[int] = None) -> None:
+        data = load_rpg_data()
+        party = data["party"]
+        
+        if valor is None:
+            lvl = party["level"]
+            xp_atual = party["xp"]
+            proximo = XP_TABLE.get(lvl + 1, "MAX")
+            embed = discord.Embed(title="🛡️ Progresso da Party", color=discord.Color.blue())
+            embed.add_field(name="Nível Atual", value=f"**{lvl}**")
+            embed.add_field(name="XP", value=f"{xp_atual} / {proximo}")
+            return await interaction.response.send_message(embed=embed)
+
+        party["xp"] += valor
+        msg = f"✨ Party ganhou **{valor}** de XP!"
+        
+        # Check level up
+        new_lvl = party["level"]
+        while True:
+            prox_xp = XP_TABLE.get(new_lvl + 1)
+            if prox_xp and party["xp"] >= prox_xp:
+                new_lvl += 1
+            else:
+                break
+        
+        if new_lvl > party["level"]:
+            party["level"] = new_lvl
+            msg += f"\n\n🎊 **LEVEL UP!** A party agora é nível **{new_lvl}**! 🎊"
+        
+        save_rpg_data(data)
+        await interaction.response.send_message(msg)
+
+    titulo_group = app_commands.Group(name="titulo", description="Gerencia títulos dos personagens.")
+
+    @titulo_group.command(name="add", description="Atribui um título a um jogador.")
+    async def titulo_add(self, interaction: discord.Interaction, usuario: discord.Member, titulo: str) -> None:
+        data = load_rpg_data()
+        uid = str(usuario.id)
+        if uid not in data["users"]: data["users"][uid] = {"macros": {}, "fichas": {}, "titles": []}
+        if "titles" not in data["users"][uid]: data["users"][uid]["titles"] = []
+        
+        data["users"][uid]["titles"].append(titulo)
+        save_rpg_data(data)
+        await interaction.response.send_message(f"🏅 **{usuario.display_name}** agora é conhecido como: *{titulo}*")
+
+    @titulo_group.command(name="listar", description="Lista os títulos de um jogador.")
+    async def titulo_listar(self, interaction: discord.Interaction, usuario: discord.Member) -> None:
+        data = load_rpg_data()
+        titles = data.get("users", {}).get(str(usuario.id), {}).get("titles", [])
+        if not titles: return await interaction.response.send_message(f"{usuario.display_name} não possui títulos ainda.")
+        
+        list_str = "\n".join(f"• {t}" for t in titles)
+        await interaction.response.send_message(f"🏅 **Títulos de {usuario.display_name}:**\n{list_str}")
+
+    @app_commands.command(name="ranking_crits", description="Mostra quem são os jogadores mais sortudos (Natural 20).")
+    async def ranking_crits(self, interaction: discord.Interaction) -> None:
+        data = load_rpg_data()
+        crits = data.get("stats", {}).get("crits", {})
+        if not crits: return await interaction.response.send_message("Nenhum crítico registrado ainda.")
+        
+        # Sort by value
+        sorted_crits = sorted(crits.items(), key=lambda x: x[1], reverse=True)
+        ranking = "\n".join(f"**{i+1}.** <@{uid}>: {count} 🔥" for i, (uid, count) in enumerate(sorted_crits[:10]))
+        
+        embed = discord.Embed(title="🏆 Ranking de Críticos (Natural 20)", description=ranking, color=discord.Color.gold())
+        await interaction.response.send_message(embed=embed)
+
+    def _record_crit(self, user):
+        data = load_rpg_data()
+        uid = str(user.id)
+        if uid not in data["stats"]["crits"]:
+            data["stats"]["crits"][uid] = 0
+        data["stats"]["crits"][uid] += 1
+        save_rpg_data(data)
+
     @app_commands.command(name="gold", description="Soma/subtrai ouro da party.")
     async def gold(self, interaction: discord.Interaction, valor: int) -> None:
         data = load_rpg_data()
@@ -348,7 +434,12 @@ class RpgManagerCog(commands.Cog, name="RPG"):
         # Simples: XdY
         if re.fullmatch(r"(\d*d\d+.*)", content):
             res = parse_roll(content)
-            if res: await message.channel.send(format_result(res))
+            if res:
+                await message.channel.send(format_result(res))
+                # Se for um único dado e tirou 20
+                if len(res.rolls) == 1 and res.rolls[0] == 20:
+                    self._record_crit(message.author)
+                    await message.add_reaction("🔥")
 
     async def _mass_roll(self, msg, n, notation):
         if n > BULK_ROLL_LIMIT: return await msg.channel.send(f"Limite: {BULK_ROLL_LIMIT}")

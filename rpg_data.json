@@ -3,14 +3,19 @@
         "123": {
             "fichas": {
                 "forca": 10
-            }
+            },
+            "titles": [
+                "Novato"
+            ]
         }
     },
     "party": {
         "gold": 500,
         "inventory": [
             "Espada"
-        ]
+        ],
+        "xp": 100,
+        "level": 1
     },
     "hp": {
         "miler": {
@@ -22,5 +27,10 @@
         "miler": [
             "Bênção"
         ]
+    },
+    "stats": {
+        "crits": {
+            "123": 5
+        }
     }
 }
