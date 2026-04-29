@@ -14,6 +14,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import FFMPEG_OPTIONS, IDLE_TIMEOUT, YTDL_OPTIONS, PLAYLISTS, RADIO_URL
+from utils.music_helper import extract_song_info
 
 # Tipos de loop suportados
 LOOP_SONG  = "song"
@@ -71,20 +72,6 @@ class MusicaCog(commands.Cog, name="Música"):
 
         return state.voice_client
 
-    async def _search_song(self, query: str) -> Optional[dict]:
-        loop = asyncio.get_event_loop()
-        with yt_dlp.YoutubeDL(YTDL_OPTIONS) as ydl:
-            info = await loop.run_in_executor(
-                None, lambda: ydl.extract_info(query, download=False)
-            )
-        if "entries" in info:
-            info = info["entries"][0]
-        return {
-            "source": info["url"], 
-            "title": info["title"],
-            "thumbnail": info.get("thumbnail", ""),
-            "webpage_url": info.get("webpage_url", "")
-        }
 
     async def _play_next(self, guild_id: int) -> None:
         state = self._state(guild_id)
@@ -176,7 +163,7 @@ class MusicaCog(commands.Cog, name="Música"):
 
         await interaction.followup.send(f"🔎 Procurando por `{query}`...")
         try:
-            song = await self._search_song(query)
+            song = await extract_song_info(query)
         except Exception as exc:
             print(f"[ERRO play] {exc}")
             return await interaction.channel.send(
@@ -278,7 +265,7 @@ class MusicaCog(commands.Cog, name="Música"):
                 state.text_channel = interaction.channel
 
             try:
-                song = await self._search_song(RADIO_URL)
+                song = await extract_song_info(RADIO_URL)
                 state.queue.append(song)
                 vc = state.voice_client
                 if vc and not vc.is_playing() and not vc.is_paused():
@@ -317,7 +304,7 @@ class MusicaCog(commands.Cog, name="Música"):
 
         for link in links:
             try:
-                song = await self._search_song(link)
+                song = await extract_song_info(link)
                 state.queue.append(song)
                 await interaction.channel.send(f"✅ Adicionado à fila: **{song['title']}**")
             except Exception as exc:

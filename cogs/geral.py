@@ -9,11 +9,10 @@ from discord.ext import commands
 
 
 HELP_TEXT = (
-    "**Meus Comandos (Agora com barra `/`):**\n"
-    "🎵 **Música:** `/play <nome ou link>`, `/skip`, `/pause`, `/resume`, "
-    "`/queue`, `/radio`, `/playlist <nome>`, `/loop <song/queue/off>`\n"
-    "🎲 **Dados e RPG:** `/dados`, `/teste`, `/macro`, `/macro_salvar`, `/iniciativa_rolar`\n"
-    "🤖 **RPG com IA:** `!rpg_start` inicia Rilem/Miler · `!rpg_stop` encerra\n"
+    "**Meus Comandos (Agora todos em `/`):**\n"
+    "🎵 **Música:** `/play`, `/skip`, `/pause`, `/resume`, `/queue`, `/radio`, `/playlist`, `/loop`\n"
+    "🎲 **RPG & Dados:** `/dados`, `/teste`, `/atacar`, `/hp`, `/turno`, `/status`, `/encontro`, `/loot`\n"
+    "🤖 **RPG com IA:** `/rpg_start` inicia Rilem/Miler · `/rpg_stop` encerra\n"
     "   *(Após iniciar, mencione o bot para interagir)*"
 )
 
