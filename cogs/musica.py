@@ -264,22 +264,13 @@ class MusicSearchView(discord.ui.View):
             state.voice_client = voice_client
             state.text_channel = interaction.channel
 
-        # Se for link direto, toca logo
-        if query.startswith("http"):
-            song = await extract_song_info(query)
-            if song:
-                await self._add_to_queue(interaction, song)
-            else:
-                await interaction.followup.send("Não consegui carregar esse link.")
-            return
-
-        # Busca múltiplos resultados
+        # Busca unificada (Link ou Termo)
         results = await search_songs(query)
         if not results:
             return await interaction.followup.send(f"❌ Nenhuma música encontrada para `{query}`.")
 
         view = MusicSearchView(self, results)
-        await interaction.followup.send(f"🔎 Resultados para `{query}`:", view=view)
+        await interaction.followup.send(f"🔎 Resultados encontrados:", view=view)
 
     @app_commands.command(name="pause", description="Pausa a música atual.")
     async def pause(self, interaction: discord.Interaction) -> None:

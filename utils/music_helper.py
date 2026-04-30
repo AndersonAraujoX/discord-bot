@@ -38,22 +38,41 @@ async def extract_song_info(query: str) -> Optional[dict]:
             return None
 
 async def search_songs(query: str, limit: int = 5) -> List[dict]:
-    """Retorna uma lista de candidatos para a busca."""
+    """Retorna uma lista de candidatos. Se for link, busca o título e versões alternativas."""
     loop = asyncio.get_event_loop()
-    # Força a busca no YouTube se não for URL
-    search_query = f"ytsearch{limit}:{query}" if not query.startswith("http") else query
     
+    is_url = query.startswith("http")
+    results = []
+
     with yt_dlp.YoutubeDL(YTDL_OPTIONS) as ydl:
         try:
-            info = await loop.run_in_executor(
-                None, lambda: ydl.extract_info(search_query, download=False)
-            )
+            # 1. Se for URL, pega a info da URL primeiro
+            if is_url:
+                info = await loop.run_in_executor(None, lambda: ydl.extract_info(query, download=False))
+                if "entries" in info: info = info["entries"][0]
+                
+                original = {
+                    "source": info.get("url"),
+                    "title": f"🔗 Original: {info.get('title')}",
+                    "thumbnail": info.get("thumbnail", ""),
+                    "webpage_url": info.get("webpage_url", ""),
+                    "duration": info.get("duration", 0)
+                }
+                results.append(original)
+                # Usa o título para buscar alternativas
+                query = info.get("title")
+
+            # 2. Busca termos (ou alternativas se veio de URL)
+            search_query = f"ytsearch{limit}:{query}"
+            info_search = await loop.run_in_executor(None, lambda: ydl.extract_info(search_query, download=False))
             
-            results = []
-            entries = info.get("entries", [info] if "url" in info else [])
-            
+            entries = info_search.get("entries", [])
             for entry in entries:
                 if not entry: continue
+                # Evita duplicar o original se for exatamente o mesmo título/url
+                if is_url and entry.get("webpage_url") == results[0]["webpage_url"]:
+                    continue
+                    
                 results.append({
                     "source": entry.get("url"),
                     "title": entry.get("title"),
@@ -61,10 +80,11 @@ async def search_songs(query: str, limit: int = 5) -> List[dict]:
                     "webpage_url": entry.get("webpage_url", ""),
                     "duration": entry.get("duration", 0)
                 })
+                
             return results[:limit]
         except Exception as e:
-            print(f"Erro Search YTDL: {e}")
-            return []
+            print(f"Erro Search/URL YTDL: {e}")
+            return results # Retorna o que conseguiu (pode ser só o original)
 
 async def get_yt_suggestions(query: str) -> List[str]:
     """Busca sugestões de termos do YouTube enquanto o usuário digita."""
