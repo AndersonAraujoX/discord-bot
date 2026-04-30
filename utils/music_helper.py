@@ -1,5 +1,6 @@
 import asyncio
 import yt_dlp
+import aiohttp
 from typing import Optional, List
 
 YTDL_OPTIONS = {
@@ -64,3 +65,23 @@ async def search_songs(query: str, limit: int = 5) -> List[dict]:
         except Exception as e:
             print(f"Erro Search YTDL: {e}")
             return []
+
+async def get_yt_suggestions(query: str) -> List[str]:
+    """Busca sugestões de termos do YouTube enquanto o usuário digita."""
+    if not query: return []
+    url = f"https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&q={query}"
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    # O formato é: window.google.ac.h(["query",[["sug1",0],["sug2",0]]...])
+                    import json
+                    # Extração simples via regex ou fatiamento
+                    start = text.find("(") + 1
+                    end = text.rfind(")")
+                    data = json.loads(text[start:end])
+                    return [s[0] for s in data[1]]
+        except:
+            pass
+    return []

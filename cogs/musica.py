@@ -14,7 +14,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import FFMPEG_OPTIONS, IDLE_TIMEOUT, YTDL_OPTIONS, PLAYLISTS, RADIO_URL
-from utils.music_helper import extract_song_info, search_songs
+from utils.music_helper import extract_song_info, search_songs, get_yt_suggestions
 
 # Tipos de loop suportados
 LOOP_SONG  = "song"
@@ -102,6 +102,15 @@ class MusicaCog(commands.Cog, name="Música"):
             self._states[guild_id] = GuildMusicState()
         return self._states[guild_id]
 
+    async def music_autocomplete(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+        """Callback para sugestões do YouTube em tempo real."""
+        if not current or len(current) < 3: return [] # Só busca após 3 caracteres
+        suggestions = await get_yt_suggestions(current)
+        return [
+            app_commands.Choice(name=s, value=s)
+            for s in suggestions[:25]
+        ]
+
     async def _connect(self, interaction: discord.Interaction) -> Optional[discord.VoiceClient]:
         if not interaction.user.voice:
             await interaction.followup.send("Você não está em um canal de voz!")
@@ -162,7 +171,7 @@ class MusicSearchView(discord.ui.View):
         idx = int(self.select.values[0])
         song = self.results[idx]
         await self.cog._add_to_queue(interaction, song)
-        self.stop() # Encerra a view pós-seleção
+        self.stop()
 
 
     async def _play_next(self, guild_id: int) -> None:
@@ -238,6 +247,7 @@ class MusicSearchView(discord.ui.View):
         await interaction.followup.send("Até mais! 👋")
 
     @app_commands.command(name="play", description="Busca e adiciona uma música à fila.")
+    @app_commands.autocomplete(query=music_autocomplete)
     async def play(self, interaction: discord.Interaction, query: str) -> None:
         await interaction.response.defer()
         
