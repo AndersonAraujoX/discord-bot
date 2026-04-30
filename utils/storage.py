@@ -27,6 +27,8 @@ def load_rpg_data():
                     data["sessions"] = {"history": [], "active": None}
                 if "calendar" not in data:
                     data["calendar"] = {"day": 1, "month": 1, "year": 1200}
+                if "channel_notes" not in data:
+                    data["channel_notes"] = {}
                 return data
         except json.JSONDecodeError:
             pass
@@ -38,7 +40,8 @@ def load_rpg_data():
         "statuses": {},
         "stats": {"crits": {}},
         "sessions": {"history": [], "active": None},
-        "calendar": {"day": 1, "month": 1, "year": 1200}
+        "calendar": {"day": 1, "month": 1, "year": 1200},
+        "channel_notes": {}
     }
 
 def save_rpg_data(data):

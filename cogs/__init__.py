@@ -6,4 +6,5 @@ COGS = [
     "cogs.musica",
     "cogs.rpg",         # IA RPG
     "cogs.rpg_manager", # Mecânicas de RPG
+    "cogs.notes",       # Notações de Canal/Conta
 ]
