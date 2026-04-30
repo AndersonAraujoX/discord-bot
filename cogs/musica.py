@@ -14,7 +14,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import FFMPEG_OPTIONS, IDLE_TIMEOUT, YTDL_OPTIONS, PLAYLISTS, RADIO_URL
-from utils.music_helper import extract_song_info
+from utils.music_helper import extract_song_info, search_songs
 
 # Tipos de loop suportados
 LOOP_SONG  = "song"
@@ -121,6 +121,49 @@ class MusicaCog(commands.Cog, name="Música"):
 
         return state.voice_client
 
+    async def _add_to_queue(self, interaction: discord.Interaction, song: dict):
+        state = self._state(interaction.guild.id)
+        state.queue.append(song)
+        
+        embed = discord.Embed(
+            title="✅ Adicionado à fila",
+            description=f"**[{song['title']}]({song.get('webpage_url', '')})**",
+            color=discord.Color.blue()
+        )
+        if song.get("thumbnail"):
+            embed.set_thumbnail(url=song["thumbnail"])
+            
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed)
+        else:
+            await interaction.response.send_message(embed=embed)
+
+        vc = state.voice_client
+        if vc and not vc.is_playing() and not vc.is_paused():
+            await self._play_next(interaction.guild.id)
+
+class MusicSearchView(discord.ui.View):
+    def __init__(self, cog, results):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.results = results
+
+        options = []
+        for i, res in enumerate(results):
+            # Limita título para 100 chars (limite do Select)
+            title = res['title'][:100]
+            options.append(discord.SelectOption(label=title, value=str(i), description=f"Duração: {res.get('duration', 0)}s"))
+
+        self.select = discord.ui.Select(placeholder="Escolha uma música...", options=options)
+        self.select.callback = self.select_callback
+        self.add_item(self.select)
+
+    async def select_callback(self, interaction: discord.Interaction):
+        idx = int(self.select.values[0])
+        song = self.results[idx]
+        await self.cog._add_to_queue(interaction, song)
+        self.stop() # Encerra a view pós-seleção
+
 
     async def _play_next(self, guild_id: int) -> None:
         state = self._state(guild_id)
@@ -206,28 +249,27 @@ class MusicaCog(commands.Cog, name="Música"):
 
         if not voice_client or not voice_client.is_connected():
             vc = await self._connect(interaction)
-            if not vc:
-                return
+            if not vc: return
         else:
             state.voice_client = voice_client
             state.text_channel = interaction.channel
 
-        await interaction.followup.send(f"🔎 Procurando por `{query}`...")
-        try:
+        # Se for link direto, toca logo
+        if query.startswith("http"):
             song = await extract_song_info(query)
-        except Exception as exc:
-            print(f"[ERRO play] {exc}")
-            return await interaction.channel.send(
-                "Não consegui encontrar a música. "
-                "Se for do YouTube, verifique se `cookies.txt` está presente."
-            )
+            if song:
+                await self._add_to_queue(interaction, song)
+            else:
+                await interaction.followup.send("Não consegui carregar esse link.")
+            return
 
-        state.queue.append(song)
-        await interaction.channel.send(f"✅ Adicionado à fila: **{song['title']}**")
+        # Busca múltiplos resultados
+        results = await search_songs(query)
+        if not results:
+            return await interaction.followup.send(f"❌ Nenhuma música encontrada para `{query}`.")
 
-        vc = state.voice_client
-        if vc and not vc.is_playing() and not vc.is_paused():
-            await self._play_next(interaction.guild.id)
+        view = MusicSearchView(self, results)
+        await interaction.followup.send(f"🔎 Resultados para `{query}`:", view=view)
 
     @app_commands.command(name="pause", description="Pausa a música atual.")
     async def pause(self, interaction: discord.Interaction) -> None:
