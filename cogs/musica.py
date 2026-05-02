@@ -5,21 +5,16 @@ Estado de cada servidor encapsulado na classe GuildMusicState.
 """
 
 import asyncio
-from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List
 
 import discord
-import yt_dlp
 from discord import app_commands
 from discord.ext import commands
 
-from config import FFMPEG_OPTIONS, IDLE_TIMEOUT, YTDL_OPTIONS, PLAYLISTS, RADIO_URL
-from utils.music_helper import extract_song_info, search_songs, get_yt_suggestions
-
-# Tipos de loop suportados
-LOOP_SONG  = "song"
-LOOP_QUEUE = "queue"
-LOOP_OFF   = None
+from config import PLAYLISTS, RADIO_URL
+from utils.music_helper import search_songs, get_yt_suggestions, extract_song_info
+from utils.ui_components import LOOP_SONG, LOOP_QUEUE, LOOP_OFF, MusicSearchView
+from utils.music_core import MusicManager
 
 AMBIENT_SOUNDS = {
     "Chuva": "https://www.youtube.com/watch?v=mPZkdNFkNps",
@@ -29,40 +24,13 @@ AMBIENT_SOUNDS = {
     "Suspense": "https://www.youtube.com/watch?v=S_S7p6tFmXU"
 }
 
-from utils.ui_components import MusicControlView, LOOP_SONG, LOOP_QUEUE, LOOP_OFF
-
-
-@dataclass
-class GuildMusicState:
-    """Estado de música isolado por servidor (guild)."""
-    queue:        list[dict]             = field(default_factory=list)
-    voice_client: Optional[discord.VoiceClient] = None
-    text_channel: Optional[discord.TextChannel] = None
-    current:      Optional[dict]         = None
-    loop:         Optional[str]          = None   # LOOP_SONG | LOOP_QUEUE | None
-    radio_mode:   bool                   = False
-    volume:       float                  = 1.0
-
-    def clear(self) -> None:
-        self.queue.clear()
-        self.current = None
-        self.loop    = None
-        self.radio_mode = False
-
 
 class MusicaCog(commands.Cog, name="Música"):
     """Comandos para tocar músicas em canais de voz."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self._states: dict[int, GuildMusicState] = {}
-
-    # ── Utilitários internos ─────────────────────────────────────────────────
-
-    def _state(self, guild_id: int) -> GuildMusicState:
-        if guild_id not in self._states:
-            self._states[guild_id] = GuildMusicState()
-        return self._states[guild_id]
+        self.music_manager = MusicManager(bot)
 
     async def music_autocomplete(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
         """Callback para sugestões do YouTube em tempo real."""
@@ -73,154 +41,12 @@ class MusicaCog(commands.Cog, name="Música"):
             for s in suggestions[:25]
         ]
 
-    async def _connect(self, interaction: discord.Interaction) -> Optional[discord.VoiceClient]:
-        if not interaction.user.voice:
-            await interaction.followup.send("Você não está em um canal de voz!")
-            return None
-
-        channel = interaction.user.voice.channel
-        state   = self._state(interaction.guild.id)
-        state.text_channel = interaction.channel
-
-        voice_client = interaction.guild.voice_client
-
-        if voice_client:
-            await voice_client.move_to(channel)
-            state.voice_client = voice_client
-        else:
-            state.voice_client = await channel.connect()
-
-        return state.voice_client
-
-    async def _add_to_queue(self, interaction: discord.Interaction, song: dict):
-        state = self._state(interaction.guild.id)
-        state.queue.append(song)
-        
-        embed = discord.Embed(
-            title="✅ Adicionado à fila",
-            description=f"**[{song['title']}]({song.get('webpage_url', '')})**",
-            color=discord.Color.blue()
-        )
-        if song.get("thumbnail"):
-            embed.set_thumbnail(url=song["thumbnail"])
-            
-        if interaction.response.is_done():
-            await interaction.followup.send(embed=embed)
-        else:
-            await interaction.response.send_message(embed=embed)
-
-        vc = state.voice_client
-        if vc and not vc.is_playing() and not vc.is_paused():
-            await self._play_next(interaction.guild.id)
-
-class MusicSearchView(discord.ui.View):
-    def __init__(self, cog, results):
-        super().__init__(timeout=60)
-        self.cog = cog
-        self.results = results
-
-        options = []
-        for i, res in enumerate(results):
-            # Limita título para 100 chars (limite do Select)
-            title = res['title'][:100]
-            options.append(discord.SelectOption(label=title, value=str(i), description=f"Duração: {res.get('duration', 0)}s"))
-
-        self.select = discord.ui.Select(placeholder="Escolha uma música...", options=options)
-        self.select.callback = self.select_callback
-        self.add_item(self.select)
-
-    async def select_callback(self, interaction: discord.Interaction):
-        idx = int(self.select.values[0])
-        song = self.results[idx]
-        await self.cog._add_to_queue(interaction, song)
-        self.stop()
-
-
-    async def _play_fx(self, interaction: discord.Interaction, url: str):
-        """Toca um efeito sonoro curto sem parar a música de fundo permanentemente."""
-        state = self._state(interaction.guild.id)
-        if not state.voice_client:
-            vc = await self._connect(interaction)
-            if not vc: return
-        
-        # Se já estiver deferido ou respondido
-        if not interaction.response.is_done():
-            await interaction.response.send_message(f"🔊 Efeito sonoro acionado!", ephemeral=True)
-        else:
-            await interaction.followup.send(f"🔊 Efeito sonoro acionado!", ephemeral=True)
-        
-        # Para soundboard, inserimos no topo da fila e pulamos a atual
-        song = await extract_song_info(url)
-        if song:
-            if state.voice_client.is_playing():
-                # Re-adiciona a música atual no topo (após o FX) para continuar de onde parou 
-                if state.current:
-                    state.queue.insert(0, state.current)
-                state.queue.insert(0, song)
-                state.voice_client.stop() # Mata a atual para rodar o FX
-            else:
-                state.queue.insert(0, song)
-                await self._play_next(interaction.guild.id)
-
-    async def _play_next(self, guild_id: int) -> None:
-        state = self._state(guild_id)
-        vc    = state.voice_client
-
-        if not vc or not vc.is_connected():
-            return
-
-        if state.current:
-            if state.loop == LOOP_SONG:
-                state.queue.insert(0, state.current)
-            elif state.loop == LOOP_QUEUE:
-                state.queue.append(state.current)
-
-        if not state.queue:
-            state.current = None
-            if state.text_channel:
-                await state.text_channel.send("A fila terminou. 🎵")
-            if state.loop != LOOP_QUEUE and not state.radio_mode:
-                await asyncio.sleep(IDLE_TIMEOUT)
-                if vc and not vc.is_playing():
-                    await vc.disconnect()
-                    state.voice_client = None
-            return
-
-        song           = state.queue.pop(0)
-        state.current  = song
-
-        try:
-            source = discord.FFmpegPCMAudio(song["source"], **FFMPEG_OPTIONS)
-            source = discord.PCMVolumeTransformer(source, volume=state.volume)
-            vc.play(
-                source,
-                after=lambda _: asyncio.run_coroutine_threadsafe(
-                    self._play_next(guild_id), self.bot.loop
-                ),
-            )
-            embed = discord.Embed(
-                title="🎶 Tocando agora", 
-                description=f"**[{song['title']}]({song.get('webpage_url', '')})**", 
-                color=discord.Color.green()
-            )
-            if song.get("thumbnail"):
-                embed.set_thumbnail(url=song["thumbnail"])
-            
-            if state.text_channel:
-                view = MusicControlView(self, guild_id)
-                await state.text_channel.send(embed=embed, view=view)
-        except Exception as exc:
-            if state.text_channel:
-                await state.text_channel.send(f"Erro ao tocar música: `{exc}`")
-            state.current = None
-            await self._play_next(guild_id)
-
     # ── Comandos ──────────────────────────────────────────────────────────────
 
     @app_commands.command(name="join", description="Entra no canal de voz atual.")
     async def join(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
-        vc = await self._connect(interaction)
+        vc = await self.music_manager.connect_voice(interaction)
         if vc:
             await interaction.followup.send(f"Entrei em: **{interaction.user.voice.channel.name}** 🎙️")
 
@@ -231,7 +57,7 @@ class MusicSearchView(discord.ui.View):
         if not voice_client:
             return await interaction.followup.send("Eu não estou em um canal de voz.")
         await voice_client.disconnect()
-        self._state(interaction.guild.id).clear()
+        self.music_manager.get_state(interaction.guild.id).clear()
         await interaction.followup.send("Até mais! 👋")
 
     @app_commands.command(name="play", description="Busca e adiciona uma música à fila.")
@@ -242,11 +68,11 @@ class MusicSearchView(discord.ui.View):
         if not interaction.user.voice:
             return await interaction.followup.send("Você precisa estar em um canal de voz.")
 
-        state = self._state(interaction.guild.id)
+        state = self.music_manager.get_state(interaction.guild.id)
         voice_client = interaction.guild.voice_client
 
         if not voice_client or not voice_client.is_connected():
-            vc = await self._connect(interaction)
+            vc = await self.music_manager.connect_voice(interaction)
             if not vc: return
         else:
             state.voice_client = voice_client
@@ -257,7 +83,7 @@ class MusicSearchView(discord.ui.View):
         if not results:
             return await interaction.followup.send(f"❌ Nenhuma música encontrada para `{query}`.")
 
-        view = MusicSearchView(self, results)
+        view = MusicSearchView(self.music_manager, results)
         await interaction.followup.send(f"🔎 Resultados encontrados:", view=view)
 
     @app_commands.command(name="pause", description="Pausa a música atual.")
@@ -289,13 +115,13 @@ class MusicSearchView(discord.ui.View):
 
     @app_commands.command(name="queue", description="Exibe a fila de músicas.")
     async def show_queue(self, interaction: discord.Interaction) -> None:
-        state = self._state(interaction.guild.id)
+        state = self.music_manager.get_state(interaction.guild.id)
         if not state.queue:
             return await interaction.response.send_message("A fila está vazia.")
 
         embed = discord.Embed(title="🎵 Fila de Músicas", color=discord.Color.blurple())
         embed.description = "\n".join(
-            f"{i + 1}. **{song['title']}**"
+            f"{i + 1}. **{song.get('title', 'Desconhecido')}**"
             for i, song in enumerate(state.queue)
         )
         embed.set_footer(text=f"Loop: {state.loop or 'desligado'}")
@@ -308,7 +134,7 @@ class MusicSearchView(discord.ui.View):
         app_commands.Choice(name="Desligado", value="off")
     ])
     async def loop_cmd(self, interaction: discord.Interaction, mode: app_commands.Choice[str] = None) -> None:
-        state = self._state(interaction.guild.id)
+        state = self.music_manager.get_state(interaction.guild.id)
 
         if mode is None:
             current = state.loop or "desligado"
@@ -327,7 +153,7 @@ class MusicSearchView(discord.ui.View):
     @app_commands.command(name="radio", description="Alterna o modo rádio Lo-Fi 24/7.")
     async def radio(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
-        state = self._state(interaction.guild.id)
+        state = self.music_manager.get_state(interaction.guild.id)
         state.radio_mode = not state.radio_mode
         
         if state.radio_mode:
@@ -339,7 +165,7 @@ class MusicSearchView(discord.ui.View):
 
             voice_client = interaction.guild.voice_client
             if not voice_client or not voice_client.is_connected():
-                vc = await self._connect(interaction)
+                vc = await self.music_manager.connect_voice(interaction)
                 if not vc:
                     return
             else:
@@ -351,7 +177,7 @@ class MusicSearchView(discord.ui.View):
                 state.queue.append(song)
                 vc = state.voice_client
                 if vc and not vc.is_playing() and not vc.is_paused():
-                    await self._play_next(interaction.guild.id)
+                    await self.music_manager.play_next(interaction.guild.id)
             except Exception as exc:
                 print(f"[ERRO radio] {exc}")
                 await interaction.channel.send("Erro ao sintonizar a rádio.")
@@ -373,11 +199,11 @@ class MusicSearchView(discord.ui.View):
         if not interaction.user.voice:
             return await interaction.channel.send("Você precisa estar em um canal de voz.")
 
-        state = self._state(interaction.guild.id)
+        state = self.music_manager.get_state(interaction.guild.id)
         voice_client = interaction.guild.voice_client
 
         if not voice_client or not voice_client.is_connected():
-            vc = await self._connect(interaction)
+            vc = await self.music_manager.connect_voice(interaction)
             if not vc:
                 return
         else:
@@ -388,13 +214,13 @@ class MusicSearchView(discord.ui.View):
             try:
                 song = await extract_song_info(link)
                 state.queue.append(song)
-                await interaction.channel.send(f"✅ Adicionado à fila: **{song['title']}**")
+                await interaction.channel.send(f"✅ Adicionado à fila: **{song.get('title', 'Desconhecido')}**")
             except Exception as exc:
                 print(f"[ERRO playlist] {exc}")
                 
             vc = state.voice_client
             if vc and not vc.is_playing() and not vc.is_paused():
-                await self._play_next(interaction.guild.id)
+                await self.music_manager.play_next(interaction.guild.id)
 
     @app_commands.command(name="ambiente", description="Toca sons de ambiente para imersão (Chuva, Taverna, etc).")
     @app_commands.choices(som=[
@@ -402,13 +228,13 @@ class MusicSearchView(discord.ui.View):
     ])
     async def ambiente(self, interaction: discord.Interaction, som: app_commands.Choice[str]) -> None:
         await self.play(interaction, som.value)
-        state = self._state(interaction.guild.id)
+        state = self.music_manager.get_state(interaction.guild.id)
         state.loop = LOOP_SONG # Força loop na música de ambiente
         await interaction.channel.send(f"🌌 **Clima alterado para:** {som.name}")
 
     @app_commands.command(name="volume", description="Ajusta o volume da música (0-100).")
     async def volume(self, interaction: discord.Interaction, nivel: int) -> None:
-        state = self._state(interaction.guild.id)
+        state = self.music_manager.get_state(interaction.guild.id)
         state.volume = nivel / 100
         
         if state.voice_client and state.voice_client.source:
@@ -421,3 +247,4 @@ class MusicSearchView(discord.ui.View):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(MusicaCog(bot))
+
