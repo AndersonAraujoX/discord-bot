@@ -14,31 +14,8 @@ from config import BULK_ROLL_LIMIT
 from utils.dice_engine import format_result, parse_roll
 from utils.storage import load_rpg_data, save_rpg_data
 
-XP_TABLE = {
-    1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500, 
-    6: 14000, 7: 23000, 8: 34000, 9: 48000, 10: 64000
-}
-
-TABLES_FILE = "rpg_tables.json"
-
-def load_rpg_tables():
-    if os.path.exists(TABLES_FILE):
-        try:
-            with open(TABLES_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            pass
-    return {"encounters": {}, "loot": {}, "facts": []}
-
-class TurnoView(discord.ui.View):
-    def __init__(self, cog, channel_id):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.channel_id = channel_id
-
-    @discord.ui.button(label="Próximo Turno", style=discord.ButtonStyle.green, emoji="⏭️")
-    async def next_turn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._avancar_turno(interaction)
+from utils.rpg_core import XP_TABLE, load_rpg_tables, get_hp_bar
+from utils.ui_components import TurnoView
 
 class RpgManagerCog(commands.Cog, name="RPG"):
     """Sistema unificado de mecânicas de RPG (Dados, Fichas, Combate e Exploração)."""
@@ -48,16 +25,6 @@ class RpgManagerCog(commands.Cog, name="RPG"):
         self.tables = load_rpg_tables()
         # self.iniciativas: channel_id -> {"current_index": int, "participants": list[dict]}
         self.iniciativas: dict[int, dict] = {}
-
-    # ── Utilitários de Interface ──────────────────────────────────────────────
-
-    def _get_hp_bar(self, atual, maximo):
-        size = 10
-        filled = max(0, min(size, round((atual / maximo) * size)))
-        bar = "🟩" * filled + "⬜" * (size - filled)
-        percent = (atual / maximo) * 100
-        return f"{bar} ({atual}/{maximo}) — {percent:.0f}%"
-
     # ── Autocompletes ─────────────────────────────────────────────────────────
 
     async def biome_autocomplete(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
@@ -109,6 +76,63 @@ class RpgManagerCog(commands.Cog, name="RPG"):
             await interaction.response.send_message(f"✅ Macro **{nome}** (`{valor}`) salva!")
         
         save_rpg_data(data)
+
+    @app_commands.command(name="ficha", description="Exibe a ficha completa do seu herói.")
+    async def ficha(self, interaction: discord.Interaction, usuario: Optional[discord.Member] = None) -> None:
+        target = usuario or interaction.user
+        data = load_rpg_data()
+        uid = str(target.id)
+        u_data = data.get("users", {}).get(uid, {})
+        
+        if not u_data:
+            return await interaction.response.send_message(f"❌ **{target.display_name}** ainda não possui dados registrados.", ephemeral=True)
+
+        embed = discord.Embed(title=f"🛡️ Ficha de Herói: {target.display_name}", color=discord.Color.gold())
+        embed.set_thumbnail(url=target.display_avatar.url)
+
+        # Atributos
+        attrs = "\n".join([f"**{k.capitalize()}**: {v:+d}" for k, v in u_data.get("fichas", {}).items()]) or "Nenhum atributo definido."
+        embed.add_field(name="📊 Atributos", value=attrs, inline=True)
+
+        # HP
+        hp_info = data.get("hp", {}).get(target.display_name.lower())
+        if hp_info:
+            embed.add_field(name="❤️ Vitalidade", value=get_hp_bar(hp_info["atual"], hp_info["max"]), inline=True)
+        else:
+            embed.add_field(name="❤️ Vitalidade", value="Não registrado.", inline=True)
+
+        # Progresso
+        party = data["party"]
+        prox_xp = XP_TABLE.get(party["level"] + 1, "MAX")
+        embed.add_field(name="🌟 Nível da Party", value=f"Nível {party['level']} ({party['xp']}/{prox_xp} XP)", inline=False)
+
+        # Títulos
+        titles = u_data.get("titles", [])
+        if titles:
+            embed.add_field(name="🏅 Títulos", value="\n".join(f"• {t}" for t in titles), inline=False)
+
+        # Status ativos
+        stats = data.get("statuses", {}).get(target.display_name.lower(), [])
+        if stats:
+            status_str = []
+            for s in stats:
+                if isinstance(s, dict):
+                    status_str.append(f"• {s['name']} ({s['duration']} turnos)")
+                else:
+                    status_str.append(f"• {s}")
+            embed.add_field(name="⚡ Condições", value="\n".join(status_str), inline=False)
+
+        view = discord.ui.View()
+        btn = discord.ui.Button(label="Atualizar", style=discord.ButtonStyle.grey, emoji="🔄")
+        async def update_callback(inter):
+            await self.ficha(inter, target)
+        btn.callback = update_callback
+        view.add_item(btn)
+
+        if interaction.response.is_done():
+            await interaction.edit_original_response(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view)
 
     @app_commands.command(name="teste", description="Rola 1d20 somado a um atributo da ficha.")
     async def teste(self, interaction: discord.Interaction, atributo: str) -> None:
@@ -228,6 +252,10 @@ class RpgManagerCog(commands.Cog, name="RPG"):
         
         view = TurnoView(self, cid)
         
+        # Processa Status/Durações ao avançar o turno
+        if ini["idx"] == 0: # Iniciou nova rodada
+            await self._process_statuses(interaction.guild.id)
+
         if interaction.response.is_done():
             await interaction.edit_original_response(embed=embed, view=view)
         else:
@@ -271,11 +299,115 @@ class RpgManagerCog(commands.Cog, name="RPG"):
         if not lista: return await interaction.response.send_message("Nível não encontrado.", ephemeral=True)
         await interaction.response.send_message(f"💎 **Loot:** {random.choice(lista)} (Nível {nivel})")
 
-    @app_commands.command(name="dado_fato", description="Sorteia curiosidade da mesa.")
-    async def fato(self, interaction: discord.Interaction) -> None:
-        fatos = self.tables.get("facts", [])
-        if not fatos: return await interaction.response.send_message("Sem fatos cadastrados.")
-        await interaction.response.send_message(f"📖 **Fato:** {random.choice(fatos)}")
+    @app_commands.command(name="npc", description="Gera um NPC instantâneo.")
+    async def npc_gen(self, interaction: discord.Interaction) -> None:
+        d = self.tables["npc_data"]
+        nome = random.choice(d["names"])
+        raca = random.choice(d["races"])
+        perso = random.choice(d["personalities"])
+        desejo = random.choice(d["desires"])
+        
+        embed = discord.Embed(title=f"👤 NPC: {nome}", color=discord.Color.random())
+        embed.add_field(name="Raça", value=raca)
+        embed.add_field(name="Personalidade", value=perso)
+        embed.add_field(name="Desejo/Segredo", value=desejo, inline=False)
+        
+        # Opcional: Fala da IA
+        from utils.ai_helper import generate_ai_response
+        prompt = f"Gere uma única frase de apresentação curta para um NPC {raca} que é {perso} e quer {desejo}."
+        fala = await generate_ai_response(prompt)
+        if fala:
+            embed.description = f"*\"{fala}\"*"
+            
+        await interaction.response.send_message(embed=embed)
+
+    # ── Sistema de Inventário Avançado ────────────────────────────────────────
+
+    mochila_group = app_commands.Group(name="mochila", description="Gerencia o inventário do grupo.")
+
+    @mochila_group.command(name="add", description="Adiciona um item detalhado ao inventário.")
+    async def item_add(self, interaction: discord.Interaction, nome: str, descricao: str = "Sem descrição.", peso: float = 0.0) -> None:
+        data = load_rpg_data()
+        item = {"nome": nome, "desc": descricao, "peso": peso}
+        data["party"]["inventory"].append(item)
+        save_rpg_data(data)
+        await interaction.response.send_message(f"🎒 **{nome}** adicionado à mochila!")
+
+    @mochila_group.command(name="listar", description="Lista todos os itens da mochila.")
+    async def item_listar(self, interaction: discord.Interaction) -> None:
+        data = load_rpg_data()
+        inv = data["party"]["inventory"]
+        if not inv: return await interaction.response.send_message("A mochila está vazia.")
+        
+        embed = discord.Embed(title="🎒 Mochila de Itens", color=discord.Color.dark_grey())
+        total_peso = 0
+        for i, item in enumerate(inv):
+            # Suporte para itens antigos (strings) e novos (dicts)
+            if isinstance(item, str):
+                name, desc, p = item, "Item antigo", 0
+            else:
+                name, desc, p = item["nome"], item["desc"], item["peso"]
+            
+            total_peso += p
+            embed.add_field(name=f"{i+1}. {name} ({p}kg)", value=desc, inline=False)
+        
+        embed.set_footer(text=f"Carga Total: {total_peso:.1f}kg")
+        await interaction.response.send_message(embed=embed)
+
+    @mochila_group.command(name="remover", description="Remove um item pelo número.")
+    async def item_remover(self, interaction: discord.Interaction, numero: int) -> None:
+        data = load_rpg_data()
+        inv = data["party"]["inventory"]
+        if 1 <= numero <= len(inv):
+            removido = inv.pop(numero - 1)
+            name = removido if isinstance(removido, str) else removido["nome"]
+            save_rpg_data(data)
+            await interaction.response.send_message(f"🗑️ **{name}** removido da mochila.")
+        else:
+            await interaction.response.send_message("❌ Número inválido.", ephemeral=True)
+
+    # ── Sistema de Condições (Status) ─────────────────────────────────────────
+
+    condicao_group = app_commands.Group(name="condicao", description="Gerencia buffs/debuffs.")
+
+    @condicao_group.command(name="add", description="Adiciona uma condição com duração.")
+    async def cond_add(self, interaction: discord.Interaction, alvo: str, nome: str, duracao: int = 3) -> None:
+        data = load_rpg_data()
+        alvo = alvo.lower()
+        if alvo not in data["statuses"]: data["statuses"][alvo] = []
+        
+        # Remove se já existir para atualizar duração
+        data["statuses"][alvo] = [s for s in data["statuses"][alvo] if (s if isinstance(s, str) else s["name"]) != nome]
+        
+        data["statuses"][alvo].append({"name": nome, "duration": duracao})
+        save_rpg_data(data)
+        await interaction.response.send_message(f"⚡ **{alvo.capitalize()}** agora está sob efeito de **{nome}** ({duracao} turnos)!")
+
+    async def _process_statuses(self, guild_id):
+        # Reduz durações e limpa expirados
+        data = load_rpg_data()
+        expired = []
+        
+        for alvo, statuses in data["statuses"].items():
+            new_list = []
+            for s in statuses:
+                if isinstance(s, dict):
+                    s["duration"] -= 1
+                    if s["duration"] > 0:
+                        new_list.append(s)
+                    else:
+                        expired.append(f"⏰ O efeito **{s['name']}** em **{alvo.capitalize()}** expirou!")
+                else:
+                    new_list.append(s) # Sem duração definida (permanente até manual)
+            data["statuses"][alvo] = new_list
+        
+        if expired:
+            # Envia aviso no canal (precisamos do canal, mas o cog gerencia por channel_id na iniciativa)
+            # Para simplificar, assumimos que as notas de expiração vão para onde o turno avançou
+            save_rpg_data(data)
+            return expired
+        save_rpg_data(data)
+        return []
 
     # ── Grupo & Economia ──────────────────────────────────────────────────────
 

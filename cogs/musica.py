@@ -29,45 +29,7 @@ AMBIENT_SOUNDS = {
     "Suspense": "https://www.youtube.com/watch?v=S_S7p6tFmXU"
 }
 
-class MusicControlView(discord.ui.View):
-    def __init__(self, cog, guild_id):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.guild_id = guild_id
-
-    @discord.ui.button(label="⏯️", style=discord.ButtonStyle.grey)
-    async def play_pause(self, interaction: discord.Interaction, button: discord.ui.Button):
-        state = self.cog._state(self.guild_id)
-        if state.voice_client:
-            if state.voice_client.is_playing():
-                state.voice_client.pause()
-                await interaction.response.send_message("Pausado.", ephemeral=True)
-            elif state.voice_client.is_paused():
-                state.voice_client.resume()
-                await interaction.response.send_message("Retomado.", ephemeral=True)
-
-    @discord.ui.button(label="⏭️ Próxima", style=discord.ButtonStyle.grey)
-    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        state = self.cog._state(self.guild_id)
-        if state.voice_client and state.voice_client.is_playing():
-            state.voice_client.stop()
-            await interaction.response.send_message("Pulada.", ephemeral=True)
-
-    @discord.ui.button(label="🔁 Loop", style=discord.ButtonStyle.grey)
-    async def toggle_loop(self, interaction: discord.Interaction, button: discord.ui.Button):
-        state = self.cog._state(self.guild_id)
-        if state.loop == LOOP_OFF: state.loop = LOOP_SONG
-        elif state.loop == LOOP_SONG: state.loop = LOOP_QUEUE
-        else: state.loop = LOOP_OFF
-        await interaction.response.send_message(f"Loop: {state.loop or 'OFF'}", ephemeral=True)
-
-    @discord.ui.button(label="⏹️ Parar", style=discord.ButtonStyle.red)
-    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
-        state = self.cog._state(self.guild_id)
-        state.clear()
-        if state.voice_client:
-            await state.voice_client.disconnect()
-        await interaction.response.send_message("Música encerrada.", ephemeral=True)
+from utils.ui_components import MusicControlView, LOOP_SONG, LOOP_QUEUE, LOOP_OFF
 
 
 @dataclass
@@ -173,6 +135,32 @@ class MusicSearchView(discord.ui.View):
         await self.cog._add_to_queue(interaction, song)
         self.stop()
 
+
+    async def _play_fx(self, interaction: discord.Interaction, url: str):
+        """Toca um efeito sonoro curto sem parar a música de fundo permanentemente."""
+        state = self._state(interaction.guild.id)
+        if not state.voice_client:
+            vc = await self._connect(interaction)
+            if not vc: return
+        
+        # Se já estiver deferido ou respondido
+        if not interaction.response.is_done():
+            await interaction.response.send_message(f"🔊 Efeito sonoro acionado!", ephemeral=True)
+        else:
+            await interaction.followup.send(f"🔊 Efeito sonoro acionado!", ephemeral=True)
+        
+        # Para soundboard, inserimos no topo da fila e pulamos a atual
+        song = await extract_song_info(url)
+        if song:
+            if state.voice_client.is_playing():
+                # Re-adiciona a música atual no topo (após o FX) para continuar de onde parou 
+                if state.current:
+                    state.queue.insert(0, state.current)
+                state.queue.insert(0, song)
+                state.voice_client.stop() # Mata a atual para rodar o FX
+            else:
+                state.queue.insert(0, song)
+                await self._play_next(interaction.guild.id)
 
     async def _play_next(self, guild_id: int) -> None:
         state = self._state(guild_id)

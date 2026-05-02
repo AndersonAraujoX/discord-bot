@@ -18,5 +18,28 @@
     "Sempre verifique armadilhas antes de abrir o baú.",
     "A taverna 'O Porco Alado' tem a melhor cerveja da região.",
     "Diz a lenda que o Rilem uma vez derrotou um exército com uma colher."
-  ]
+  ],
+  "npc_data": {
+    "names": ["Alaric", "Bryn", "Caelum", "Dara", "Elowen", "Finnian", "Gwyneth", "Haldor", "Isolde", "Jaxon"],
+    "races": ["Humano", "Elfo", "Anão", "Halfling", "Meio-Orc", "Tiefling", "Gnomo", "Dragonborn"],
+    "personalities": ["Rancoroso", "Extremamente alegre", "Sempre desconfiado", "Muito distraído", "Arrogante", "Gentil e prestativo", "Cansado da vida", "Misterioso"],
+    "desires": ["Encontrar um tesouro perdido", "Vingar a morte de um parente", "Apenas chegar vivo ao fim do dia", "Tornar-se um herói lendário", "Abrir sua própria taverna", "Aprender uma magia proibida"]
+  },
+  "shop_items": {
+    "Ferreiro": [
+      {"nome": "Espada Longa", "desc": "Causa dano de corte confiável.", "preco": 150, "peso": 1.5},
+      {"nome": "Escudo de Madeira", "desc": "Defesa básica.", "preco": 50, "peso": 2.0},
+      {"nome": "Cota de Malha", "desc": "Armadura pesada.", "preco": 750, "peso": 15.0}
+    ],
+    "Alquimista": [
+      {"nome": "Poção de Cura Menor", "desc": "Cura 2d4+2 HP.", "preco": 50, "peso": 0.2},
+      {"nome": "Fogo Alquímico", "desc": "Explosivo leve.", "preco": 100, "peso": 0.5},
+      {"nome": "Poção de Invisibilidade", "desc": "Torna o usuário invisível por 1 hora.", "preco": 500, "peso": 0.2}
+    ],
+    "Místico": [
+      {"nome": "Pergaminho de Mísseis Mágicos", "desc": "Casta a magia 1 vez.", "preco": 150, "peso": 0.1},
+      {"nome": "Varinha Quebrada", "desc": "Pode explodir.", "preco": 50, "peso": 0.5},
+      {"nome": "Cristal de Foco", "desc": "+1 em magias.", "preco": 1000, "peso": 1.0}
+    ]
+  }
 }
