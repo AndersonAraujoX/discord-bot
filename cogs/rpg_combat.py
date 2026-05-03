@@ -52,24 +52,51 @@ class RpgCombatCog(commands.Cog, name="RPG Combate"):
             return await interaction.response.send_message("Sem combate ativo.", ephemeral=True)
         
         ini = self.iniciativas[cid]
-        ordenada = sorted(ini["players"].values(), key=lambda x: x["roll"], reverse=True)
-        ini["idx"] = (ini["idx"] + 1) % len(ordenada)
-        atual = ordenada[ini["idx"]]
+        # Ordena: maior rolagem primeiro. Em caso de empate, mantemos a ordem de entrada.
+        ordenada = sorted(ini["players"].items(), key=lambda x: x[1]["roll"], reverse=True)
         
-        embed = discord.Embed(title="🛡️ Ordem de Combate", color=discord.Color.blue())
+        # Incrementa o turno
+        ini["idx"] += 1
+        
+        # Se demos a volta completa, incrementa o round
+        if ini["idx"] >= len(ordenada):
+            ini["idx"] = 0
+            ini["round"] += 1
+            await self._process_statuses(interaction.guild.id, interaction.channel)
+
+        key, atual = ordenada[ini["idx"]]
+        
+        embed = discord.Embed(
+            title=f"🛡️ Ordem de Combate — Round {ini['round']}", 
+            color=discord.Color.blue()
+        )
         lista_str = []
-        for i, p in enumerate(ordenada):
+        for i, (k, p) in enumerate(ordenada):
             seta = "➡️ " if i == ini["idx"] else "      "
-            lista_str.append(f"{seta}**{p['roll']}** - {p['name']}")
+            vivo = "💀 " if p.get("dead") else ""
+            lista_str.append(f"{seta}**{p['roll']}** - {p['name']} {vivo}")
         
         embed.description = "\n".join(lista_str)
         embed.add_field(name="Vez de:", value=atual['mention'])
+
+        # Busca condições ativas para quem vai jogar
+        data = load_rpg_data()
+        statuses = data.get("statuses", {})
+        
+        # Procura tanto por ID (para players) quanto por Nome em minúsculo (para NPCs)
+        alvo_lookup = str(key) if isinstance(key, int) else key.lower()
+        active_conds = statuses.get(alvo_lookup, [])
+        if not active_conds and isinstance(key, str):
+            # Fallback se a chave no dicionário foi o nome original
+            active_conds = statuses.get(atual["name"].lower(), [])
+
+        if active_conds:
+            conds_str = "\n".join([f"• {c['name']} ({c['duration']} turnos)" for c in active_conds if isinstance(c, dict)])
+            if conds_str:
+                embed.add_field(name="⚠️ Efeitos Ativos", value=conds_str, inline=False)
         
         view = TurnoView(self, cid)
         
-        if ini["idx"] == 0:
-            await self._process_statuses(interaction.guild.id)
-
         if interaction.response.is_done():
             await interaction.edit_original_response(embed=embed, view=view)
         else:
@@ -79,19 +106,90 @@ class RpgCombatCog(commands.Cog, name="RPG Combate"):
 
     @iniciativa_group.command(name="iniciar", description="Abre o combate no canal.")
     async def ini_start(self, interaction: discord.Interaction) -> None:
-        self.iniciativas[interaction.channel.id] = {"idx": -1, "players": {}}
+        self.iniciativas[interaction.channel.id] = {"idx": -1, "round": 1, "players": {}}
         await interaction.response.send_message("⚔️ **Combate iniciado!** Usem `/iniciativa rolar` para entrar na briga.")
 
-    @iniciativa_group.command(name="rolar", description="Entra no combate.")
-    async def ini_roll(self, interaction: discord.Interaction) -> None:
+    @iniciativa_group.command(name="rolar", description="Entra no combate (Player).")
+    @app_commands.describe(dado="Número de faces do dado a ser rolado (Padrão: 20)")
+    async def ini_roll(self, interaction: discord.Interaction, dado: int = 20) -> None:
         cid = interaction.channel.id
         if cid not in self.iniciativas: return await interaction.response.send_message("Sem combate ativo.", ephemeral=True)
         
+        # Impede dados inválidos
+        if dado < 1:
+            dado = 20
+
         data = load_rpg_data()
         dex = data.get("users", {}).get(str(interaction.user.id), {}).get("fichas", {}).get("destreza", 0)
-        roll = random.randint(1, 20) + dex
+        
+        resultado_dado = random.randint(1, dado)
+        roll = resultado_dado + dex
         self.iniciativas[cid]["players"][interaction.user.id] = {"name": interaction.user.display_name, "roll": roll, "mention": interaction.user.mention}
-        await interaction.response.send_message(f"🎲 {interaction.user.mention} rolou **{roll}**!")
+        
+        await interaction.response.send_message(
+            f"🎲 {interaction.user.mention} entrou na iniciativa!\n"
+            f"> Rolou um **d{dado}** e tirou `{resultado_dado}` + Destreza `{dex}` = **{roll}**!"
+        )
+
+    @iniciativa_group.command(name="npc", description="Mestre: Rola a iniciativa e adiciona um NPC.")
+    @app_commands.describe(nome="Nome do NPC/Monstro", modificador="Bônus de Destreza (Padrão: 0)", dado="Faces do dado (Padrão: 20)")
+    async def ini_npc(self, interaction: discord.Interaction, nome: str, modificador: int = 0, dado: int = 20) -> None:
+        cid = interaction.channel.id
+        if cid not in self.iniciativas: 
+            return await interaction.response.send_message("Sem combate ativo.", ephemeral=True)
+        
+        if dado < 1:
+            dado = 20
+            
+        resultado_dado = random.randint(1, dado)
+        rolagem = resultado_dado + modificador
+        
+        key_npc = f"npc_{nome}_{random.randint(100,999)}"
+        self.iniciativas[cid]["players"][key_npc] = {
+            "name": nome, 
+            "roll": rolagem, 
+            "mention": f"**{nome}** (NPC)"
+        }
+        await interaction.response.send_message(
+            f"🦇 **{nome}** (NPC) entrou no combate!\n"
+            f"> Rolou um **d{dado}** e tirou `{resultado_dado}` + Modificador `{modificador}` = **{rolagem}**!"
+        )
+
+    @iniciativa_group.command(name="remover", description="Mestre: Remove alguém da ordem (use o nome exato ou id).")
+    async def ini_remove(self, interaction: discord.Interaction, nome: str) -> None:
+        cid = interaction.channel.id
+        if cid not in self.iniciativas: 
+            return await interaction.response.send_message("Sem combate ativo.", ephemeral=True)
+        
+        ini = self.iniciativas[cid]
+        # Procura pela chave ou pelo nome do combatente
+        alvo_key = None
+        for k, p in ini["players"].items():
+            if p["name"].lower() == nome.lower() or str(k) == nome:
+                alvo_key = k
+                break
+                
+        if alvo_key:
+            nome_removido = ini["players"][alvo_key]["name"]
+            del ini["players"][alvo_key]
+            
+            # Ajusta o index se o removido estava antes do atual
+            ordenada = sorted(ini["players"].items(), key=lambda x: x[1]["roll"], reverse=True)
+            if ini["idx"] >= len(ordenada):
+                ini["idx"] = max(-1, len(ordenada) - 1)
+                
+            await interaction.response.send_message(f"❌ **{nome_removido}** foi removido(a) do combate.")
+        else:
+            await interaction.response.send_message(f"⚠️ Combatente '{nome}' não encontrado na lista.", ephemeral=True)
+
+    @iniciativa_group.command(name="encerrar", description="Mestre: Encerra o combate atual no canal.")
+    async def ini_end(self, interaction: discord.Interaction) -> None:
+        cid = interaction.channel.id
+        if cid in self.iniciativas:
+            del self.iniciativas[cid]
+            await interaction.response.send_message("🛑 **Combate encerrado!** O sangue seca nas espadas e o silêncio retorna.")
+        else:
+            await interaction.response.send_message("Sem combate ativo neste canal.", ephemeral=True)
 
     @app_commands.command(name="turno", description="Exibe a ordem e avança para o próximo combatente.")
     async def turn_cmd(self, interaction: discord.Interaction) -> None:
@@ -103,6 +201,7 @@ class RpgCombatCog(commands.Cog, name="RPG Combate"):
     async def cond_add(self, interaction: discord.Interaction, alvo: str, nome: str, duracao: int = 3) -> None:
         data = load_rpg_data()
         alvo = alvo.lower()
+        if "statuses" not in data: data["statuses"] = {}
         if alvo not in data["statuses"]: data["statuses"][alvo] = []
         
         data["statuses"][alvo] = [s for s in data["statuses"][alvo] if (s if isinstance(s, str) else s["name"]) != nome]
@@ -111,8 +210,10 @@ class RpgCombatCog(commands.Cog, name="RPG Combate"):
         save_rpg_data(data)
         await interaction.response.send_message(f"⚡ **{alvo.capitalize()}** agora está sob efeito de **{nome}** ({duracao} turnos)!")
 
-    async def _process_statuses(self, guild_id):
+    async def _process_statuses(self, guild_id, channel):
         data = load_rpg_data()
+        if "statuses" not in data: return []
+        
         expired = []
         
         for alvo, statuses in data["statuses"].items():
@@ -129,6 +230,10 @@ class RpgCombatCog(commands.Cog, name="RPG Combate"):
             data["statuses"][alvo] = new_list
         
         save_rpg_data(data)
+        
+        if expired and channel:
+            await channel.send("\n".join(expired))
+            
         return expired
 
 async def setup(bot: commands.Bot) -> None:
