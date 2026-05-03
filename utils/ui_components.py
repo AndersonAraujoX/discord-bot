@@ -5,6 +5,26 @@ LOOP_SONG = "song"
 LOOP_QUEUE = "queue"
 LOOP_OFF = None
 
+class NPCModal(discord.ui.Modal, title="Adicionar NPC à Iniciativa"):
+    nome = discord.ui.TextInput(label="Nome do NPC", placeholder="Ex: Dragão Vermelho", required=True)
+    dado = discord.ui.TextInput(label="Faces do Dado (d20, d10...)", default="20", required=False)
+    mod = discord.ui.TextInput(label="Modificador de Destreza", default="0", required=False)
+
+    def __init__(self, cog, channel_id):
+        super().__init__()
+        self.cog = cog
+        self.channel_id = channel_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            d = int(self.dado.value) if self.dado.value.isdigit() else 20
+            m = int(self.mod.value) if self.mod.value.replace("-","").isdigit() else 0
+            
+            # Chama a lógica interna do Cog (precisamos garantir que ela exista ou adaptar)
+            await self.cog.adicionar_npc_logica(interaction, self.nome.value, m, d)
+        except Exception as e:
+            await interaction.response.send_message(f"Erro ao adicionar NPC: {e}", ephemeral=True)
+
 class TurnoView(discord.ui.View):
     """View para controle de turnos de RPG."""
     def __init__(self, cog, channel_id):
@@ -15,6 +35,17 @@ class TurnoView(discord.ui.View):
     @discord.ui.button(label="Próximo Turno", style=discord.ButtonStyle.green, emoji="⏭️")
     async def next_turn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._avancar_turno(interaction)
+
+    @discord.ui.button(label="🔄 Atualizar", style=discord.ButtonStyle.grey)
+    async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Chama a lógica de avançar turno mas sem incrementar o index
+        await self.cog._avancar_turno(interaction, skip_advance=True)
+
+    @discord.ui.button(label="🦇 Add NPC", style=discord.ButtonStyle.grey)
+    async def add_npc_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(NPCModal(self.cog, self.channel_id))
+
+
 
 
 class MusicControlView(discord.ui.View):

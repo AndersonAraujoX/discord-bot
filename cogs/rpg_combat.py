@@ -46,7 +46,7 @@ class RpgCombatCog(commands.Cog, name="RPG Combate"):
         embed.add_field(name="Resultado", value=res, inline=False)
         await interaction.response.send_message(embed=embed)
 
-    async def _avancar_turno(self, interaction: discord.Interaction):
+    async def _avancar_turno(self, interaction: discord.Interaction, skip_advance: bool = False):
         cid = interaction.channel.id
         if cid not in self.iniciativas or not self.iniciativas[cid]["players"]:
             return await interaction.response.send_message("Sem combate ativo.", ephemeral=True)
@@ -55,14 +55,19 @@ class RpgCombatCog(commands.Cog, name="RPG Combate"):
         # Ordena: maior rolagem primeiro. Em caso de empate, mantemos a ordem de entrada.
         ordenada = sorted(ini["players"].items(), key=lambda x: x[1]["roll"], reverse=True)
         
-        # Incrementa o turno
-        ini["idx"] += 1
-        
-        # Se demos a volta completa, incrementa o round
-        if ini["idx"] >= len(ordenada):
+        if not skip_advance:
+            # Incrementa o turno
+            ini["idx"] += 1
+            
+            # Se demos a volta completa, incrementa o round
+            if ini["idx"] >= len(ordenada):
+                ini["idx"] = 0
+                ini["round"] += 1
+                await self._process_statuses(interaction.guild.id, interaction.channel)
+
+        # Se o index for -1 (início do combate) e pedirmos atualizar, colocamos no 0
+        if ini["idx"] == -1:
             ini["idx"] = 0
-            ini["round"] += 1
-            await self._process_statuses(interaction.guild.id, interaction.channel)
 
         key, atual = ordenada[ini["idx"]]
         
@@ -131,9 +136,7 @@ class RpgCombatCog(commands.Cog, name="RPG Combate"):
             f"> Rolou um **d{dado}** e tirou `{resultado_dado}` + Destreza `{dex}` = **{roll}**!"
         )
 
-    @iniciativa_group.command(name="npc", description="Mestre: Rola a iniciativa e adiciona um NPC.")
-    @app_commands.describe(nome="Nome do NPC/Monstro", modificador="Bônus de Destreza (Padrão: 0)", dado="Faces do dado (Padrão: 20)")
-    async def ini_npc(self, interaction: discord.Interaction, nome: str, modificador: int = 0, dado: int = 20) -> None:
+    async def adicionar_npc_logica(self, interaction: discord.Interaction, nome: str, modificador: int = 0, dado: int = 20) -> None:
         cid = interaction.channel.id
         if cid not in self.iniciativas: 
             return await interaction.response.send_message("Sem combate ativo.", ephemeral=True)
@@ -154,6 +157,12 @@ class RpgCombatCog(commands.Cog, name="RPG Combate"):
             f"🦇 **{nome}** (NPC) entrou no combate!\n"
             f"> Rolou um **d{dado}** e tirou `{resultado_dado}` + Modificador `{modificador}` = **{rolagem}**!"
         )
+
+    @iniciativa_group.command(name="npc", description="Mestre: Rola a iniciativa e adiciona um NPC.")
+    @app_commands.describe(nome="Nome do NPC/Monstro", modificador="Bônus de Destreza (Padrão: 0)", dado="Faces do dado (Padrão: 20)")
+    async def ini_npc(self, interaction: discord.Interaction, nome: str, modificador: int = 0, dado: int = 20) -> None:
+        await self.adicionar_npc_logica(interaction, nome, modificador, dado)
+
 
     @iniciativa_group.command(name="remover", description="Mestre: Remove alguém da ordem (use o nome exato ou id).")
     async def ini_remove(self, interaction: discord.Interaction, nome: str) -> None:
