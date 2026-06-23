@@ -28,7 +28,7 @@ if GEMINI_ENABLED:
 else:
     print("⚠️  GOOGLE_API_KEY ausente — funções de RPG desabilitadas.")
 
-GEMINI_MODEL = "gemini-1.5-flash-latest"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 # ── Cookies do YouTube ────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent

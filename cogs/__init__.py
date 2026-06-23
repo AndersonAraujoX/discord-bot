@@ -4,6 +4,7 @@
 COGS = [
     "cogs.geral",
     "cogs.musica",
+    "cogs.gravar",      # Gravação e Transcrição
     "cogs.rpg",         # IA RPG
     "cogs.rpg_ficha",   # Gestão de Personagens e Dados
     "cogs.rpg_combat",  # Sistemas de Batalha e Iniciativa
