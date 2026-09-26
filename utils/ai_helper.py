@@ -81,3 +81,64 @@ class AIHelper:
             return response.text
         except Exception as e:
             return f"Erro na chamada da API do Gemini para transcrição: {e}"
+
+    async def analyze_clan_image(self, image_bytes: bytes, mime_type: str) -> dict:
+        """
+        Analisa uma imagem de log do clã usando o Gemini para identificar quais jogadores entraram.
+        Retorna um dicionário com:
+        {
+          "total_encontrado": int,
+          "jogadores": [
+             {"nome": str, "data_hora": str | None}
+          ]
+        }
+        """
+        prompt = (
+            "Analise a imagem de log do clã fornecida e identifique todos os jogadores que entraram no clã "
+            "(geralmente indicado pela mensagem 'entrou no clã').\n"
+            "Retorne a resposta estritamente como um objeto JSON estruturado no seguinte formato:\n"
+            "{\n"
+            "  \"total_encontrado\": <quantidade total de novos membros encontrados>,\n"
+            "  \"jogadores\": [\n"
+            "    {\n"
+            "      \"nome\": \"<Nome exato do jogador>\",\n"
+            "      \"data_hora\": \"<Data/Hora se houver na imagem, ou null>\"\n"
+            "    }\n"
+            "  ]\n"
+            "}\n"
+            "Certifique-se de ser muito preciso ao ler os nomes dos jogadores e extrair exatamente o que está escrito."
+        )
+
+        def call_gemini():
+            return self._client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(
+                        data=image_bytes,
+                        mime_type=mime_type
+                    )
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                )
+            )
+
+        try:
+            response = await asyncio.to_thread(call_gemini)
+            text = response.text.strip()
+            # Remove blocos de formatação markdown caso existam
+            if text.startswith("```"):
+                lines = text.splitlines()
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                text = "\n".join(lines).strip()
+            
+            import json
+            return json.loads(text)
+        except Exception as e:
+            print(f"Erro ao analisar imagem de clã com Gemini: {e}")
+            return {"total_encontrado": 0, "jogadores": [], "error": str(e)}
+

@@ -3,6 +3,7 @@
 
 COGS = [
     "cogs.geral",
+    "cogs.clan",
     "cogs.musica",
     "cogs.gravar",      # Gravação e Transcrição
     "cogs.rpg",         # IA RPG
