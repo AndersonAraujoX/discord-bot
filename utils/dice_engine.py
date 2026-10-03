@@ -70,6 +70,7 @@ def parse_roll(notation: str) -> Optional[RollResult]:
       XdY!         → explosivo no máximo (ex: d6!)
       XdY!Z        → explosivo a partir de Z (ex: 3d10!8)
       XdYdZ        → drop: rola X dados, descarta os Z menores (ex: 4d6d1)
+      Composto     → várias parcelas somadas/subtraídas (ex: 2d6+1d4+3, 1d20+5-2)
     """
     notation = notation.strip().replace(" ", "").lower()
 
@@ -130,7 +131,67 @@ def parse_roll(notation: str) -> Optional[RollResult]:
             exploded=explode,
         )
 
-    return None
+    return _parse_compound(notation)
+
+
+_RE_TERM = re.compile(r"[+-]?[^+-]+")
+_RE_DECLARED_COUNT = re.compile(r"^(\d*)d")
+MAX_COMPOUND_TERMS = 10
+
+
+def _parse_compound(notation: str) -> Optional[RollResult]:
+    """
+    Analisa expressões com múltiplas parcelas (ex: '2d6+1d4+3').
+    Cada parcela é uma notação de dados simples ou um inteiro fixo.
+    Exige ao menos uma parcela de dados e respeita os limites de configuração.
+    """
+    terms = _RE_TERM.findall(notation)
+    if len(terms) < 2 or len(terms) > MAX_COMPOUND_TERMS or "".join(terms) != notation:
+        return None
+
+    rolls: list[int] = []
+    kept: list[int] = []
+    dropped: list[int] = []
+    total = 0
+    exploded = False
+    has_dice = False
+    declared_dice = 0
+    parts: list[str] = []
+
+    for idx, term in enumerate(terms):
+        sign = -1 if term.startswith("-") else 1
+        body = term.lstrip("+-")
+        prefix = "-" if sign < 0 else ("+" if idx else "")
+
+        if body.isdigit():
+            total += sign * int(body)
+            parts.append(prefix + body)
+            continue
+
+        sub = parse_roll(body)
+        if sub is None:
+            return None
+        has_dice = True
+        declared = _RE_DECLARED_COUNT.match(body)
+        declared_dice += int(declared.group(1)) if declared and declared.group(1) else 1
+        rolls.extend(sub.rolls)
+        kept.extend(sub.kept)
+        dropped.extend(sub.dropped)
+        total += sign * sub.total
+        exploded = exploded or sub.exploded
+        parts.append(prefix + sub.notation)
+
+    if not has_dice or declared_dice > DICE_MAX_COUNT:
+        return None
+
+    return RollResult(
+        notation="".join(parts),
+        rolls=rolls,
+        kept=kept,
+        dropped=dropped,
+        total=total,
+        exploded=exploded,
+    )
 
 
 # ── Formatadores de mensagem ──────────────────────────────────────────────────
